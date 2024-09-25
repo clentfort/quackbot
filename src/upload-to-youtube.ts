@@ -20,6 +20,14 @@ const auth = new google.auth.OAuth2(
 
 auth.setCredentials(JSON.parse(atob(YOUTUBE_TOKENS)));
 
+setInterval(
+  async () => {
+    const { credentials } = await auth.refreshAccessToken();
+    auth.setCredentials(credentials);
+  },
+  30 * 60 * 1000,
+);
+
 // YouTube API Client
 const youtube = google.youtube({ version: 'v3', auth });
 

@@ -4,19 +4,17 @@ import { uploadToYoutube } from './upload-to-youtube';
 import { uploadToTwitter } from './upload-to-twitter';
 import { getQuickbits } from './get-quickbits';
 
-// Main processing loop
 async function processNewVideos() {
   try {
     for await (const video of getQuickbits()) {
-      // Upload extracted chapter
       try {
         await Promise.allSettled([
-          // uploadToYoutube(
-          //   video.path,
-          //   `${video.title} - Quick Bits`,
-          //   'Extracted Quick Bits chapter',
-          // ),
-          // uploadToTwitter(video.path, `${video.title} - Quick Bits`),
+          uploadToYoutube(
+            video.path,
+            `${video.title} - Quick Bits`,
+            'Extracted Quick Bits chapter',
+          ),
+          uploadToTwitter(video.path, `${video.title} - Quick Bits`),
         ]);
       } catch {
         console.log(`Error uploading video ${video.title}`);
@@ -27,4 +25,5 @@ async function processNewVideos() {
   }
 }
 
+setInterval(processNewVideos, 24 * 60 * 60 * 1000);
 processNewVideos();
