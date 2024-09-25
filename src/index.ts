@@ -11,18 +11,15 @@ async function processNewVideos() {
       // Upload extracted chapter
       try {
         await Promise.allSettled([
-          uploadToYoutube(
-            video.quickBitsOutputPath,
-            `${video.videoTitle} - Quick Bits`,
-            'Extracted Quick Bits chapter',
-          ),
-          uploadToTwitter(
-            video.quickBitsOutputPath,
-            `${video.videoTitle} - Quick Bits`,
-          ),
+          // uploadToYoutube(
+          //   video.path,
+          //   `${video.title} - Quick Bits`,
+          //   'Extracted Quick Bits chapter',
+          // ),
+          // uploadToTwitter(video.path, `${video.title} - Quick Bits`),
         ]);
       } catch {
-        console.log(`Error uploading video ${video.videoTitle}`);
+        console.log(`Error uploading video ${video.title}`);
       }
     }
   } catch (error) {

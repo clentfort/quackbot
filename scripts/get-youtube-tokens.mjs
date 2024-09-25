@@ -8,14 +8,14 @@ import { google } from 'googleapis';
 
 dotenv.config();
 
-const OAUTH_CLIENT_ID = env.OAUTH_CLIENT_ID;
-const OAUTH_CLIENT_SECRET = env.OAUTH_CLIENT_SECRET;
+const GOOGLE_OAUTH_CLIENT_ID = env.GOOGLE_OAUTH_CLIENT_ID;
+const GOOGLE_OAUTH_CLIENT_SECRET = env.GOOGLE_OAUTH_CLIENT_SECRET;
 const REDIRECT_URI = 'http://localhost:8080';
 
 // Initialize Google OAuth2 Client
 const auth = new google.auth.OAuth2(
-  OAUTH_CLIENT_ID,
-  OAUTH_CLIENT_SECRET,
+  GOOGLE_OAUTH_CLIENT_ID,
+  GOOGLE_OAUTH_CLIENT_SECRET,
   REDIRECT_URI,
 );
 

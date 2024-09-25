@@ -10,6 +10,22 @@ import { exec } from 'youtube-dl-exec';
 const CHANNEL_ID = env.CHANNEL_ID!;
 const YOUTUBE_API_KEY = env.YOUTUBE_API_KEY!;
 
+interface YoutubeId {
+  id: { videoId: string };
+}
+
+interface YoutubeSnippet {
+  snippet: {
+    publishedAt: string;
+    title: string;
+    description: string;
+  };
+}
+
+interface YoutubeContentDetails {
+  contentDetails: { duration: string };
+}
+
 interface Chapter {
   end: number;
   title: string;
@@ -20,8 +36,14 @@ interface Chapter {
 // Fetch latest videos from the channel
 async function getLatestVideos() {
   const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=5`;
-  const response = await axios.get(url);
-  return response.data.items;
+  const response = await axios.get<{
+    items: Array<YoutubeId & YoutubeSnippet>;
+  }>(url);
+
+  return response.data.items.filter(({ snippet: { publishedAt } }) => {
+    const publishedDate = new Date(publishedAt);
+    return publishedDate > new Date(Date.now() - 24 * 60 * 60 * 1000);
+  });
 }
 
 // Download a video using youtube-dl
@@ -55,7 +77,9 @@ async function extractChapter(
 // Fetch video metadata including chapter details
 async function getVideoDetails(videoId: string) {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YOUTUBE_API_KEY}`;
-  const response = await axios.get(url);
+  const response = await axios.get<{
+    items: Array<YoutubeId & YoutubeSnippet & YoutubeContentDetails>;
+  }>(url);
   return response.data.items[0];
 }
 
@@ -188,8 +212,8 @@ export async function* getQuickbits() {
 
     yield {
       videoId,
-      videoTitle,
-      quickBitsOutputPath,
+      title: videoTitle,
+      path: quickBitsOutputPath,
     };
 
     console.log('Removing downloaded files...');
