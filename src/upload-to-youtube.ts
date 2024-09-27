@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import { env } from 'node:process';
 
 import { google } from 'googleapis';
+import { initDb, isUploadedToPlatform, saveUpload } from './db';
+import { Clip } from './types';
 
 // Constants
 const GOOGLE_OAUTH_CLIENT_ID = env.GOOGLE_OAUTH_CLIENT_ID!;
@@ -20,31 +22,39 @@ const auth = new google.auth.OAuth2(
 
 auth.setCredentials(JSON.parse(atob(YOUTUBE_TOKENS)));
 
-setInterval(
-  async () => {
-    const { credentials } = await auth.refreshAccessToken();
-    auth.setCredentials(credentials);
-  },
-  30 * 60 * 1000,
-);
-
 // YouTube API Client
 const youtube = google.youtube({ version: 'v3', auth });
 
-// Upload the extracted chapter to YouTube
-export async function uploadToYoutube(
-  filePath: string,
-  title: string,
-  description: string,
-): Promise<void> {
-  const response = await youtube.videos.insert({
-    part: ['snippet', 'status'],
-    requestBody: {
-      snippet: { title, description, tags: ['quick bits'], categoryId: '28' },
-      status: { privacyStatus: 'public' },
-    },
-    media: { body: fs.createReadStream(filePath) },
-  });
+const part = ['snippet', 'status'];
+const description = 'Extracted Quick Bits chapte';
+const tags = ['quick bits'];
+const categoryId = '28';
+const privacyStatus = 'public';
 
-  console.log('Video uploaded successfully:', response.data.id);
+// Upload the extracted chapter to YouTube
+export async function uploadToYoutube({ path, title, id }: Clip) {
+  const db = await initDb();
+  const isUploaded = await isUploadedToPlatform(db, id, 'youtube');
+  if (isUploaded) {
+    console.log('Video already uploaded to YouTube');
+    return;
+  }
+  try {
+    const response = await youtube.videos.insert({
+      part,
+      requestBody: {
+        snippet: { title, description, tags, categoryId },
+        status: { privacyStatus },
+      },
+      media: { body: fs.createReadStream(path) },
+    });
+
+    const youtubeVideoId = response.data.id;
+    console.log('Video uploaded successfully to YouTube:', youtubeVideoId);
+
+    // Save the YouTube upload in the database
+    await saveUpload(db, id, 'youtube', youtubeVideoId!);
+  } catch (error) {
+    console.error('Error uploading video to YouTube:', error);
+  }
 }

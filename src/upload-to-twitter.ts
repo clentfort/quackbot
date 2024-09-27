@@ -1,6 +1,8 @@
 import 'dotenv/config';
 
 import { TwitterApi } from 'twitter-api-v2';
+import { initDb, isUploadedToPlatform, saveUpload } from './db';
+import { Clip } from './types';
 
 // Twitter API credentials from .env
 const twitterClient = new TwitterApi({
@@ -10,13 +12,16 @@ const twitterClient = new TwitterApi({
   accessSecret: process.env.X_ACCESS_TOKEN_SECRET!,
 });
 
-export async function uploadToTwitter(
-  videoPath: string,
-  text: string,
-): Promise<void> {
+export async function uploadToTwitter({ id, path, title }: Clip) {
+  const db = await initDb();
+  const isUploaded = await isUploadedToPlatform(db, id, 'twitter');
+  if (isUploaded) {
+    console.log('Video already uploaded to Twitter');
+    return;
+  }
   try {
     // Step 1: Initialize media upload
-    const mediaId = await twitterClient.v1.uploadMedia(videoPath, {
+    const mediaId = await twitterClient.v1.uploadMedia(path, {
       mimeType: 'video/mp4',
     });
 
@@ -24,11 +29,15 @@ export async function uploadToTwitter(
 
     // Step 2: Post the tweet with the uploaded video
     const tweet = await twitterClient.v2.tweet({
-      text: text,
+      text: `${title} - Quick Bits`,
       media: { media_ids: [mediaId] },
     });
 
-    console.log('Tweet posted successfully with video:', tweet.data.id);
+    const twitterTweetId = tweet.data.id;
+    console.log('Tweet posted successfully with video:', twitterTweetId);
+
+    // Save the Twitter upload in the database
+    await saveUpload(db, id, 'twitter', twitterTweetId);
   } catch (error) {
     console.error('Error uploading video to Twitter:', error);
   }

@@ -6,6 +6,8 @@ import 'dotenv/config';
 import axios from 'axios';
 import ffmpeg from 'fluent-ffmpeg';
 import { exec } from 'youtube-dl-exec';
+import { initDb, isUploadedToAllPlatforms, isUploadedToPlatform } from './db';
+import { Clip } from './types';
 
 const CHANNEL_ID = env.CHANNEL_ID!;
 const YOUTUBE_API_KEY = env.YOUTUBE_API_KEY!;
@@ -35,14 +37,14 @@ interface Chapter {
 
 // Fetch latest videos from the channel
 async function getLatestVideos() {
-  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=5`;
+  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=3`;
   const response = await axios.get<{
     items: Array<YoutubeId & YoutubeSnippet>;
   }>(url);
 
   return response.data.items.filter(({ snippet: { publishedAt } }) => {
     const publishedDate = new Date(publishedAt);
-    return publishedDate > new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return publishedDate > new Date(Date.now() - 3 * 60 * 60 * 1000);
   });
 }
 
@@ -180,21 +182,35 @@ function parseChaptersFromDescription(
   return chapters;
 }
 
-export async function* getQuickbits() {
+export async function* getQuickbits(): AsyncGenerator<Clip> {
+  const db = await initDb();
   const videos = await getLatestVideos();
-  for (const video of videos) {
-    const videoId = video.id.videoId;
-    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const videoTitle = video.snippet.title;
-    const downloadedFilePath = `./videos/${videoId}.mp4`;
-    const quickBitsOutputPath = `./videos/${videoId}_quick_bits.mp4`;
 
-    console.log(`Processing video: ${videoTitle}`);
+  for (const video of videos) {
+    const {
+      id: { videoId },
+      snippet: { title },
+    } = video;
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const videoPath = `./videos/${videoId}.mp4`;
+    const clipPath = `./videos/${videoId}_quick_bits.mp4`;
+
+    // Check if the video has already been uploaded to both YouTube and Twitter
+    const needsToBeProcessed = await isUploadedToAllPlatforms(db, videoId);
+
+    if (needsToBeProcessed) {
+      console.log(
+        `Video ${title} has already been uploaded to all platforms. Skipping...`,
+      );
+      continue;
+    }
+
+    console.log(`Processing video: ${title}`);
 
     // Download video and find chapter concurrently
     const [chapter] = await Promise.all([
       findQuickBitsChapter(videoId),
-      downloadVideo(videoUrl, downloadedFilePath),
+      downloadVideo(videoUrl, videoPath),
     ]);
 
     if (!chapter) {
@@ -204,24 +220,20 @@ export async function* getQuickbits() {
 
     console.log('Extracting "Quick Bits" chapter...');
     await extractChapter(
-      downloadedFilePath,
-      quickBitsOutputPath,
+      videoPath,
+      clipPath,
       String(chapter.start - 2),
       String(chapter.duration + 4),
     );
 
-    yield {
-      videoId,
-      title: videoTitle,
-      path: quickBitsOutputPath,
-    };
+    yield { id: videoId, title, path: clipPath };
 
     console.log('Removing downloaded files...');
 
     // Clean up files
     await Promise.all([
-      fs.promises.unlink(downloadedFilePath),
-      fs.promises.unlink(quickBitsOutputPath),
+      fs.promises.unlink(videoPath),
+      fs.promises.unlink(clipPath),
     ]);
   }
 }
