@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import { env } from 'node:process';
 
 import { google } from 'googleapis';
-import { initDb, isUploadedToPlatform, saveUpload } from './db';
 import { Clip } from './types';
 
 // Constants
@@ -26,35 +25,26 @@ auth.setCredentials(JSON.parse(atob(YOUTUBE_TOKENS)));
 const youtube = google.youtube({ version: 'v3', auth });
 
 const part = ['snippet', 'status'];
-const description = 'Extracted Quick Bits chapte';
-const tags = ['quick bits'];
+const description = 'Extracted Quick Bits chapter, #shorts';
+const tags = ['quick bits', 'shorts'];
 const categoryId = '28';
 const privacyStatus = 'public';
 
 // Upload the extracted chapter to YouTube
-export async function uploadToYoutube({ path, title, id }: Clip) {
-  const db = await initDb();
-  const isUploaded = await isUploadedToPlatform(db, id, 'youtube');
-  if (isUploaded) {
-    console.log('Video already uploaded to YouTube');
-    return;
-  }
-  try {
-    const response = await youtube.videos.insert({
-      part,
-      requestBody: {
-        snippet: { title, description, tags, categoryId },
-        status: { privacyStatus },
+export async function uploadToYoutube({ path, title }: Clip) {
+  const response = await youtube.videos.insert({
+    part,
+    requestBody: {
+      snippet: {
+        title: `${title} - Quick Bits`,
+        description,
+        tags,
+        categoryId,
       },
-      media: { body: fs.createReadStream(path) },
-    });
+      status: { privacyStatus },
+    },
+    media: { body: fs.createReadStream(path) },
+  });
 
-    const youtubeVideoId = response.data.id;
-    console.log('Video uploaded successfully to YouTube:', youtubeVideoId);
-
-    // Save the YouTube upload in the database
-    await saveUpload(db, id, 'youtube', youtubeVideoId!);
-  } catch (error) {
-    console.error('Error uploading video to YouTube:', error);
-  }
+  return response.data.id!;
 }

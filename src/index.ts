@@ -1,19 +1,41 @@
 import 'dotenv/config';
 
-import { uploadToYoutube } from './upload-to-youtube';
-import { uploadToTwitter } from './upload-to-twitter';
-import { getQuickbits } from './get-quickbits';
+import { initDb, isUploadedToAllPlatforms } from './db';
+import { extractQuickBitsChapter } from './extract-quick-bits';
+import { uploadToPlatforms } from './upload-to-platforms';
+import { getLatestVideos } from './youtube-api';
 
-async function processNewVideos() {
+async function main() {
   console.log('Checking for new videos...');
-  for await (const clip of getQuickbits()) {
+
+  const db = await initDb();
+  const videos = await getLatestVideos();
+
+  for (const video of videos) {
+    const needsToBeProcessed = await isUploadedToAllPlatforms(
+      db,
+      video.videoId,
+    );
+
+    if (needsToBeProcessed) {
+      console.log(
+        `Video ${video.title} has already been uploaded to all platforms. Skipping...`,
+      );
+      continue;
+    }
+
     try {
-      await Promise.allSettled([uploadToYoutube(clip), uploadToTwitter(clip)]);
-    } catch {
-      console.log(`Error uploading video ${clip.title}`);
+      for await (const clip of extractQuickBitsChapter(video)) {
+        await uploadToPlatforms(clip);
+      }
+    } catch (error) {
+      console.log(
+        `Error extracting Quick Bits from video ${video.title}`,
+        error,
+      );
     }
   }
 }
 
-processNewVideos();
-setInterval(processNewVideos, 1 * 60 * 60 * 1000);
+main();
+setInterval(main, 1 * 60 * 60 * 1000);
