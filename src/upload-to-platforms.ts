@@ -3,7 +3,11 @@ import { Clip, Platform, TWITTER, YOUTUBE } from './types';
 import { uploadToTwitter } from './upload-to-twitter';
 import { uploadToYoutube } from './upload-to-youtube';
 
-const platforms: Array<[Platform, (clip: Clip) => Promise<string>]> = [
+type PlatformUpload = (clip: Clip) => Promise<string>;
+
+type PlatformConfig = [Platform, PlatformUpload];
+
+const platforms: Array<PlatformConfig> = [
   [YOUTUBE, uploadToYoutube],
   [TWITTER, uploadToTwitter],
 ];
@@ -13,22 +17,31 @@ export async function uploadToPlatforms(
 ): Promise<PromiseSettledResult<boolean>[]> {
   const db = await initDb();
   return Promise.allSettled(
-    platforms.map(async ([platform, upload]) => {
-      const isUploaded = await isUploadedToPlatform(db, clip.id, platform);
+    platforms.map(async ([uploadPlatform, upload]) => {
+      const isUploaded = await isUploadedToPlatform(
+        db,
+        clip.id,
+        uploadPlatform,
+      );
       if (isUploaded) {
         return false;
       }
 
+      let uploadId: string;
       try {
-        const uploadId = await upload(clip);
-        console.log(`Video uploaded successfully to ${platform}:`, uploadId);
-        await saveUpload(db, clip.id, platform, uploadId);
-        return true;
+        uploadId = await upload(clip);
+        console.log(
+          `Video uploaded successfully to ${uploadPlatform}:`,
+          uploadId,
+        );
+        await saveUpload(db, clip.id, uploadPlatform, uploadId);
       } catch (error) {
-        console.error(`Error uploading video to ${platform}:`, error);
-        await logUploadError(db, clip.id, platform, error);
+        console.error(`Error uploading video to ${uploadPlatform}:`, error);
+        await logUploadError(db, clip.id, uploadPlatform, error);
         return false;
       }
+
+      return true;
     }),
   );
 }

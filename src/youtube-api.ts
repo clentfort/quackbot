@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { env } from 'node:process';
 
 import axios from 'axios';
+import * as he from 'he';
 import { exec } from 'youtube-dl-exec';
 
 const CHANNEL_ID = env.CHANNEL_ID!;
@@ -51,7 +52,7 @@ export async function getLatestVideos(): Promise<Array<Video>> {
     })
     .map(({ id: { videoId }, snippet: { title, publishedAt } }) => ({
       videoId,
-      title,
+      title: he.decode(title),
       publishedAt,
     }));
 }

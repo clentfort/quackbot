@@ -71,7 +71,12 @@ async function findQuickBitsChapter(videoId: string): Promise<Chapter | null> {
     return null;
   }
 
-  const quickBitsNames = ['quick bits intro', 'quick bits', 'quick intro'];
+  const quickBitsNames = [
+    'quick bits intro',
+    'quick bits',
+    'quick intro',
+    'quaint blips',
+  ];
   const quickBitsChapter = findChapterByName(chapters, quickBitsNames);
 
   return quickBitsChapter ?? findShortestMiddleChapter(chapters);
