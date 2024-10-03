@@ -40,21 +40,18 @@ export interface Chapter {
 
 // Fetch latest videos from the channel
 export async function getLatestVideos(): Promise<Array<Video>> {
-  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=3`;
+  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=5`;
   const response = await axios.get<{
     items: Array<YoutubeId & YoutubeSnippet>;
   }>(url);
 
-  return response.data.items
-    .filter(({ snippet: { publishedAt } }) => {
-      const publishedDate = new Date(publishedAt);
-      return publishedDate > new Date(Date.now() - 3 * 60 * 60 * 1000);
-    })
-    .map(({ id: { videoId }, snippet: { title, publishedAt } }) => ({
+  return response.data.items.map(
+    ({ id: { videoId }, snippet: { title, publishedAt } }) => ({
       videoId,
       title: he.decode(title),
       publishedAt,
-    }));
+    }),
+  );
 }
 
 // Fetch video metadata including chapter details
