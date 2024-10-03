@@ -25,18 +25,23 @@ auth.setCredentials(JSON.parse(atob(YOUTUBE_TOKENS)));
 const youtube = google.youtube({ version: 'v3', auth });
 
 const part = ['snippet', 'status'];
-const description = 'Extracted Quick Bits chapter, #shorts';
 const tags = ['quick bits', 'shorts'];
 const categoryId = '28';
 const privacyStatus = 'public';
 
 // Upload the extracted chapter to YouTube
-export async function uploadToYoutube({ path, title }: Clip) {
+export async function uploadToYoutube({
+  path,
+  title: originalTitle,
+  id,
+}: Clip) {
+  const title = `${originalTitle} - Quick Bits`;
+  const description = `Watch the full video by @TechLinked at https://youtu.be/${id}\n\n#QuickBits #TechLinked #LTT #LinusTechTips`;
   const response = await youtube.videos.insert({
     part,
     requestBody: {
       snippet: {
-        title: `${title} - Quick Bits`,
+        title,
         description,
         tags,
         categoryId,

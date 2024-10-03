@@ -30,20 +30,18 @@ async function main() {
     video.title = he.decode(video.title);
 
     try {
+      i++;
       for await (const quickbits of extractQuickBitsChapter(video)) {
-        i++;
         await uploadToPlatforms(quickbits);
-        if (i % 3 === 0) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, 1000 * 60 * 60 * 24),
-          );
-        }
       }
     } catch (error) {
       console.log(
         `Error extracting Quick Bits from video ${video.title}`,
         error,
       );
+    }
+    if (i % 4 === 0) {
+      break;
     }
   }
 }

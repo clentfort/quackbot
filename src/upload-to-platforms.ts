@@ -36,7 +36,8 @@ export async function uploadToPlatforms(
         );
         await saveUpload(db, clip.id, uploadPlatform, uploadId);
       } catch (error) {
-        console.error(`Error uploading video to ${uploadPlatform}:`, error);
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Error uploading video to ${uploadPlatform}:`, message);
         await logUploadError(db, clip.id, uploadPlatform, error);
         return false;
       }
