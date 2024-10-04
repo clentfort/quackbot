@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import process from 'node:process';
 
 import he from 'he';
 
@@ -30,9 +31,14 @@ async function main() {
     video.title = he.decode(video.title);
 
     try {
-      i++;
       for await (const quickbits of extractQuickBitsChapter(video)) {
-        await uploadToPlatforms(quickbits);
+        if (process.env.DRY_RUN) {
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+          console.log('DRY RUN: Would have uploaded', quickbits);
+        } else {
+          i++;
+          await uploadToPlatforms(quickbits);
+        }
       }
     } catch (error) {
       console.log(
@@ -40,7 +46,8 @@ async function main() {
         error,
       );
     }
-    if (i % 4 === 0) {
+
+    if (!process.env.DRY_RUN && i % 4 === 0) {
       break;
     }
   }

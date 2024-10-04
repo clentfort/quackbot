@@ -1,8 +1,10 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import ffmpeg from 'fluent-ffmpeg';
 import { Clip } from './types';
 import { Chapter, downloadVideo, getVideoChapters, Video } from './youtube-api';
+import { hasSound } from './has-sound';
 
 // Extract a specific chapter using ffmpeg
 async function extractChapter(
@@ -82,6 +84,21 @@ async function findQuickBitsChapter(videoId: string): Promise<Chapter | null> {
   return quickBitsChapter ?? findShortestMiddleChapter(chapters);
 }
 
+async function removeFilesWithPrefix(prefix: string, directory: string) {
+  // Read all files in the directory
+  const files = await fs.promises.readdir(directory);
+
+  // Filter the files that start with the given prefix (YouTube video ID)
+  const filesToDelete = files.filter((file) => file.startsWith(prefix));
+
+  if (filesToDelete.length === 0) {
+    return;
+  }
+  await Promise.allSettled(
+    filesToDelete.map((file) => fs.promises.unlink(path.join(directory, file))),
+  );
+}
+
 export async function* extractQuickBitsChapter({
   videoId,
   title,
@@ -104,6 +121,12 @@ export async function* extractQuickBitsChapter({
       return;
     }
 
+    const doesFullVideoHaveSound = await hasSound(videoPath);
+    if (!doesFullVideoHaveSound) {
+      console.log('Video has no audio. Skipping...');
+      return;
+    }
+
     console.log('Extracting "Quick Bits" chapter...');
     await extractChapter(
       videoPath,
@@ -112,12 +135,19 @@ export async function* extractQuickBitsChapter({
       String(chapter.duration + 4),
     );
 
+    const doesClipHaveSound = await hasSound(clipPath);
+    if (!doesClipHaveSound) {
+      console.log('Clip has no audio. Skipping...');
+      return;
+    }
+
     yield { id: videoId, title, path: clipPath, publishedAt };
   } finally {
     console.log('Removing downloaded files...');
-    await Promise.allSettled([
-      fs.promises.unlink(videoPath),
-      fs.promises.unlink(clipPath),
-    ]);
+    try {
+      await removeFilesWithPrefix(videoId, './videos');
+    } catch {
+      console.error('Error removing downloaded files for video :', videoId);
+    }
   }
 }
