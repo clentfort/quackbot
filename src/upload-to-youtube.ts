@@ -29,13 +29,16 @@ const tags = ['quick bits', 'shorts'];
 const categoryId = '28';
 const privacyStatus = 'public';
 
+const titlePrefix = 'Quick Bits - ';
+const maxTitleLength = 100;
+
 // Upload the extracted chapter to YouTube
 export async function uploadToYoutube({
   path,
   title: originalTitle,
   id,
 }: Clip) {
-  const title = `${originalTitle} - Quick Bits`;
+  const title = `${titlePrefix}${originalTitle.substring(0, maxTitleLength - titlePrefix.length)}`;
   const description = `Watch the full video by @TechLinked at https://youtu.be/${id}\n\n#QuickBits #TechLinked #LTT #LinusTechTips`;
   const response = await youtube.videos.insert({
     part,
