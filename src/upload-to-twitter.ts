@@ -14,12 +14,8 @@ const twitterClient = new TwitterApi({
 const mimeType = 'video/mp4';
 
 export async function uploadToTwitter({ path, title, id }: Clip) {
-  // Step 1: Initialize media upload
   const mediaId = await twitterClient.v1.uploadMedia(path, { mimeType });
 
-  console.log(`Video uploaded with media ID: ${mediaId}`);
-
-  // Step 2: Post the tweet with the uploaded video
   const tweet = await twitterClient.v2.tweet({
     text: `${title} - Quick Bits\n\nWatch the full video by @TechLinkedYT at https://youtu.be/${id}\n\n#QuickBits #TechLinked #LTT #LinusTechTips`,
     media: { media_ids: [mediaId] },

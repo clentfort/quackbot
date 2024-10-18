@@ -12,6 +12,8 @@ import { uploadToPlatforms } from '../dist/upload-to-platforms.js';
 const videosRaw = fs.readFileSync('./videos.json', 'utf-8');
 const videos = JSON.parse(videosRaw).reverse();
 
+const limit = new Date().getDay() === 0 ? 5 : 4;
+
 async function main() {
   const db = await initDb();
   let i = 0;
@@ -22,9 +24,6 @@ async function main() {
     );
 
     if (hasBeenUploadedToAllPlatforms) {
-      console.log(
-        `Video ${video.title} has already been uploaded to all platforms. Skipping...`,
-      );
       continue;
     }
 
@@ -47,7 +46,7 @@ async function main() {
       );
     }
 
-    if (!process.env.DRY_RUN && i % 4 === 0) {
+    if (!process.env.DRY_RUN && i >= limit) {
       break;
     }
   }

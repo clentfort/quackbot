@@ -1,5 +1,6 @@
 videos.db
 videos.json
+videos-skipped.json
 videos/
 
 # Created by https://www.toptal.com/developers/gitignore/api/node

@@ -14,35 +14,30 @@ const platforms: Array<PlatformConfig> = [
 
 export async function uploadToPlatforms(
   clip: Clip,
-): Promise<PromiseSettledResult<boolean>[]> {
+): Promise<
+  PromiseSettledResult<[true, Platform, string] | [false, Platform]>[]
+> {
   const db = await initDb();
   return Promise.allSettled(
-    platforms.map(async ([uploadPlatform, upload]) => {
-      const isUploaded = await isUploadedToPlatform(
-        db,
-        clip.id,
-        uploadPlatform,
-      );
+    platforms.map(async ([platform, upload]) => {
+      const isUploaded = await isUploadedToPlatform(db, clip.id, platform);
+
       if (isUploaded) {
-        return false;
+        return [false, platform];
       }
 
       let uploadId: string;
       try {
         uploadId = await upload(clip);
-        console.log(
-          `Video uploaded successfully to ${uploadPlatform}:`,
-          uploadId,
-        );
-        await saveUpload(db, clip.id, uploadPlatform, uploadId);
+        console.log(`Video uploaded successfully to ${platform}: ${uploadId}`);
+        await saveUpload(db, clip.id, platform, uploadId);
+        return [true, platform, uploadId];
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(`Error uploading video to ${uploadPlatform}:`, message);
-        await logUploadError(db, clip.id, uploadPlatform, error);
-        return false;
+        const message = error instanceof Error ? error.message : error;
+        console.error(`Error uploading video to ${platform}:`, message);
+        await logUploadError(db, clip.id, platform, error);
+        return [false, platform];
       }
-
-      return true;
     }),
   );
 }
