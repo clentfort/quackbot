@@ -37,7 +37,7 @@ async function main() {
     console.log('Last run of the day, trying to process all videos');
     videos = [...videos, ...extraVideos];
   } else {
-    console.log(`Processing latest videos`);
+    console.log(`Processing latest videos, run ${runs}`);
   }
 
   for (const video of videos) {
@@ -75,4 +75,13 @@ async function main() {
   }
 }
 
-cron.schedule('0 * * * *', main);
+const task = cron.schedule('0 * * * *', main);
+
+function exit() {
+  console.log('Exiting');
+  task.stop();
+  process.exit();
+}
+
+process.on('SIGINT', exit);
+process.on('SIGTERM', exit);
