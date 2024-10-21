@@ -11,15 +11,18 @@ import { extractQuickBitsChapter } from './extract-quick-bits';
 import { uploadToPlatforms } from './upload-to-platforms';
 import { getLatestVideos, Video } from './youtube-api';
 
-const videosRaw = fs.readFileSync(
-  path.join(__dirname, '../videos.json'),
-  'utf-8',
-);
-const extraVideos = (JSON.parse(videosRaw) as Array<Video>).reverse();
+async function loadExtraVideos() {
+  const videosRaw = fs.readFileSync(
+    path.join(__dirname, '../videos.json'),
+    'utf-8',
+  );
+  const extraVideos = (JSON.parse(videosRaw) as Array<Video>).reverse();
 
-extraVideos.forEach((video) => {
-  video.title = he.decode(video.title);
-});
+  extraVideos.forEach((video) => {
+    video.title = he.decode(video.title);
+  });
+  return extraVideos;
+}
 
 const MAX_VIDEOS_PER_DAY = 5;
 
@@ -28,7 +31,10 @@ let runs = 0;
 async function main() {
   runs++;
   const db = await initDb();
-  let videos = await getLatestVideos();
+  let [videos, extraVideos] = await Promise.all([
+    getLatestVideos(),
+    loadExtraVideos(),
+  ]);
 
   const isLastRunOfTheDay = new Date().getHours() === 23;
 
