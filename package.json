@@ -16,7 +16,7 @@
     "dotenv": "^16.4.5",
     "ffmpeg": "^0.0.4",
     "fluent-ffmpeg": "^2.1.3",
-    "googleapis": "^144.0.0",
+    "googleapis": "^146.0.0",
     "he": "^1.2.0",
     "node-cron": "^3.0.3",
     "sqlite": "^5.1.1",
