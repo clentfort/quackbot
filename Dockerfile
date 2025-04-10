@@ -5,6 +5,7 @@ RUN apk add --no-cache python3
 FROM base AS builder
 WORKDIR /app
 
+COPY .npmrc ./
 COPY package*.json ./
 RUN npm ci --verbose --cache ./cache && \
   rm -rf ./cache
@@ -18,8 +19,9 @@ ENV NODE_ENV=production
 
 RUN apk add --no-cache ffmpeg
 
+COPY .npmrc ./
 COPY package*.json ./
-RUN npm ci --omit=dev --verbose --cache ./cache && \
+RUN npm ci --omit=dev --cache ./cache && \
   rm -rf ./cache
 
 COPY --from=builder /app/dist ./dist
