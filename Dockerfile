@@ -9,6 +9,6 @@ COPY . .
 RUN npm ci --verbose --cache ./cache && \
   npm run build && \
   rm -rf ./cache && \
-  apk del --purge python3 py3-setuptools make g++ 
+  apk del --purge py3-setuptools make g++ 
 
 CMD ["node", "dist/index.js"]
