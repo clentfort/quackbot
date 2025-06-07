@@ -4,103 +4,113 @@ import { hasSound } from './has-sound';
 
 vi.mock('fluent-ffmpeg', () => {
   const mockStaticFfprobe = vi.fn();
-
-  // Mock for the instance methods
   const mockFfmpegInstance = {
-    _callbacks: {} as Record<string, Function>, // To store 'on' event handlers
+    _callbacks: {} as Record<string, Function>,
     audioFilters: vi.fn().mockReturnThis(),
     outputOptions: vi.fn().mockReturnThis(),
     output: vi.fn().mockReturnThis(),
     on: vi.fn(function(event: string, callback: Function) {
       this._callbacks[event] = callback;
-      return this; // Return 'this' for chaining
+      return this;
     }),
-    run: vi.fn(function() {
-      // This can be used to manually trigger 'end' or 'error' for testing areAudioLevelsAudible
-      // For example, by calling this._callbacks['end'] or this._callbacks['error']
-    }),
-    // Helper to manually trigger events from tests if needed, though direct call of stored callbacks is also possible
-    _triggerEvent(event: string, ...args: any[]) {
+    run: vi.fn(function() { /* Test will trigger callbacks manually */ }),
+    _triggerEvent(event: string, ...args: any[]) { // Kept for potential direct use
       if (this._callbacks[event]) {
         this._callbacks[event](...args);
       }
     },
-    _clearCallbacks() {
-      this._callbacks = {};
-    }
   };
 
   const ffmpegConstructor = vi.fn(() => {
     // Return a fresh instance state for each call to ffmpeg()
+    // Ensure _callbacks is reset for each new "instance"
     return { ...mockFfmpegInstance, _callbacks: {} };
   });
 
   ffmpegConstructor.ffprobe = mockStaticFfprobe;
-
   return { default: ffmpegConstructor };
 });
 
-
-describe('hasSound', () => {
+describe('hasSound (Reverted Logic)', () => {
   let mockedStaticFfprobe: ReturnType<typeof vi.fn>;
-  // Variable to hold the current ffmpeg instance mock to simulate 'end' or 'error' events
-  // It's populated when ffmpeg() is called within areAudioLevelsAudible
-  // We get it by inspecting the mockConstructor.mock.results
-  let currentFfmpegInstanceMock: any;
-
+  let currentFfmpegInstanceMock: any; // To control instance behavior
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockedStaticFfprobe = ffmpeg.ffprobe as unknown as typeof mockedStaticFfprobe;
 
-    // Intercept calls to the ffmpeg constructor to get the instance
+    // Setup default mock for ffmpeg() constructor to capture the instance
+    // This can be overridden by mockImplementationOnce in specific tests if needed.
     (ffmpeg as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      const instance = (ffmpeg as ReturnType<typeof vi.fn>).getMockImplementation()!(); // Call original factory
-      currentFfmpegInstanceMock = instance; // Store the most recent instance
-      return instance;
-    });
-  });
-
-  // --- Tests for hasAudioTrack (via hasSound) ---
-  describe('hasAudioTrack logic', () => {
-    it('should resolve true if ffprobe finds an audio stream (and levels are audible)', async () => {
-      const filePath = 'dummy/path/to/video.mp4';
-      mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
-        callback(null, { streams: [{ codec_type: 'audio' }] });
-      });
-      // Mock areAudioLevelsAudible part: simulate 'end' with valid stderr for areAudioLevelsAudible
-      (ffmpeg as any).mockImplementationOnce(() => { // Ensure this specific call to ffmpeg() gets this mock
-          currentFfmpegInstanceMock = {
+        const mockInstance = {
             _callbacks: {},
             audioFilters: vi.fn().mockReturnThis(),
             outputOptions: vi.fn().mockReturnThis(),
             output: vi.fn().mockReturnThis(),
             on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }),
-          };
-          return currentFfmpegInstanceMock;
+            run: vi.fn(function() {
+                // Default run action: can simulate a successful volumedetect if not overridden
+                // For tests not focused on areAudioLevelsAudible failure, make it pass.
+                // This helps avoid TypeErrors if currentFfmpegInstanceMock is not set by a specific test.
+                if ((this as any)._callbacks['end']) {
+                    (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB');
+                }
+            }),
+        };
+        currentFfmpegInstanceMock = mockInstance;
+        return mockInstance;
+    });
+  });
+
+  describe('hasAudioTrack logic (via hasSound)', () => {
+    // Helper to set up the ffmpeg instance mock for areAudioLevelsAudible to succeed
+    const mockAreAudioLevelsAudibleSuccess = () => {
+      (ffmpeg as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        const instance = {
+          _callbacks: {},
+          audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
+          on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
+          run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }),
+        };
+        currentFfmpegInstanceMock = instance;
+        return instance;
       });
+    };
+     // Helper to set up the ffmpeg instance mock for areAudioLevelsAudible to fail (e.g. silent)
+    const mockAreAudioLevelsAudibleSilent = () => {
+      (ffmpeg as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        const instance = {
+          _callbacks: {},
+          audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
+          on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
+          run: vi.fn(function() { (this as any)._callbacks['end'](null, 'mean_volume: -95.0 dB'); }),
+        };
+        currentFfmpegInstanceMock = instance;
+        return instance;
+      });
+    };
+
+
+    it('should resolve true if ffprobe finds an audio stream and levels are audible', async () => {
+      const filePath = 'dummy/path/to/video.mp4';
+      mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
+        callback(null, { streams: [{ codec_type: 'audio' }] });
+      });
+      mockAreAudioLevelsAudibleSuccess();
 
       const sound = await hasSound(filePath);
       expect(sound).toBe(true);
-      expect(mockedStaticFfprobe).toHaveBeenCalledWith(filePath, expect.any(Function));
     });
 
-    it('should resolve false if ffprobe finds no audio stream', async () => {
+    it('should resolve false if ffprobe finds no audio stream (even if levels mock says audible)', async () => {
       const filePath = 'dummy/video_no_audio.mp4';
       mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
         callback(null, { streams: [{ codec_type: 'video' }] });
       });
-       // areAudioLevelsAudible will also run, ensure it doesn't cause issues or mock its outcome if necessary
-      (ffmpeg as any).mockImplementationOnce(() => {
-          currentFfmpegInstanceMock = { /* ... harmless mock for areAudioLevelsAudible ... */
-            _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
-            on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }), // make it pass
-          }; return currentFfmpegInstanceMock;
-      });
+      mockAreAudioLevelsAudibleSuccess(); // areAudioLevelsAudible part passes
+
       const sound = await hasSound(filePath);
-      expect(sound).toBe(false); // Because hasAudioTrack will be false
+      expect(sound).toBe(false); // Overall false due to hasAudioTrack
     });
 
     it('should resolve false if ffprobe returns empty streams array', async () => {
@@ -108,126 +118,101 @@ describe('hasSound', () => {
       mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
         callback(null, { streams: [] });
       });
-      (ffmpeg as any).mockImplementationOnce(() => { currentFfmpegInstanceMock = { /* ... harmless mock ... */ _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(), on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }), run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }), }; return currentFfmpegInstanceMock; });
+      mockAreAudioLevelsAudibleSuccess();
       const sound = await hasSound(filePath);
       expect(sound).toBe(false);
     });
 
-    it('should resolve false if ffprobe returns no stream data (null data)', async () => {
+    it('should reject if ffprobe returns no stream data (null metadata)', async () => {
       const filePath = 'dummy/video_null_data.mp4';
       mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
-        callback(null, null);
+        callback(null, null); // metadata is null
       });
-      (ffmpeg as any).mockImplementationOnce(() => { currentFfmpegInstanceMock = { /* ... harmless mock ... */ _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(), on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }), run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }), }; return currentFfmpegInstanceMock; });
-      const sound = await hasSound(filePath);
-      expect(sound).toBe(false);
+      // areAudioLevelsAudible mock won't be reached due to Promise.all short-circuiting on rejection
+      await expect(hasSound(filePath)).rejects.toThrow(TypeError); // "Cannot read properties of null (reading 'streams')"
     });
 
-    it('should resolve false if ffprobe encounters an error', async () => {
+    it('should reject if ffprobe encounters an error', async () => {
       const filePath = 'dummy/video_ffprobe_error.mp4';
       const errorMessage = 'ffprobe error';
       mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
         callback(new Error(errorMessage), null);
       });
-      // areAudioLevelsAudible might not even run if hasAudioTrack rejects first and Promise.all fails fast.
-      // Or if it does, its ffmpeg() call needs a mock.
-      (ffmpeg as any).mockImplementationOnce(() => { currentFfmpegInstanceMock = { /* ... harmless mock ... */ _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(), on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }), run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }), }; return currentFfmpegInstanceMock; });
-
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const sound = await hasSound(filePath);
-      expect(sound).toBe(false);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(`Error checking for sound in ${filePath}:`, expect.objectContaining({ message: errorMessage }));
-      consoleErrorSpy.mockRestore();
+      // areAudioLevelsAudible mock won't be reached
+      await expect(hasSound(filePath)).rejects.toThrow(errorMessage);
     });
 
-    it('should resolve false if streams array is missing in metadata', async () => {
+    it('should reject if streams array is missing in metadata', async () => {
       const filePath = 'dummy/video_no_streams_property.mp4';
       mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
-        callback(null, {});
+        callback(null, {}); // metadata is {}, metadata.streams is undefined
       });
-      (ffmpeg as any).mockImplementationOnce(() => { currentFfmpegInstanceMock = { /* ... harmless mock ... */ _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(), on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }), run: vi.fn(function() { (this as any)._callbacks['end'](null, 'stderr_with_mean_volume: -20 dB'); }), }; return currentFfmpegInstanceMock; });
-      const sound = await hasSound(filePath);
-      expect(sound).toBe(false);
+      // areAudioLevelsAudible mock won't be reached
+      await expect(hasSound(filePath)).rejects.toThrow(TypeError); // "Cannot read properties of undefined (reading 'some')"
     });
   });
 
-  // --- Tests for areAudioLevelsAudible (via hasSound) ---
-  describe('areAudioLevelsAudible logic', () => {
+  describe('areAudioLevelsAudible logic (via hasSound)', () => {
     beforeEach(() => {
-      // For these tests, hasAudioTrack should resolve true, so ffprobe gets a valid audio stream
+      // For these tests, hasAudioTrack should resolve true
       mockedStaticFfprobe.mockImplementation((pathArg, callback) => {
         callback(null, { streams: [{ codec_type: 'audio' }] });
       });
     });
 
+    const setupAreAudioLevelsAudibleMock = (stderr: string | null, error?: Error) => {
+        (ffmpeg as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+            const instance = {
+                _callbacks: {},
+                audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
+                on: vi.fn(function(event: string, cb: Function) { (this as any)._callbacks[event] = cb; return this; }),
+                run: vi.fn(function() {
+                    if (error) {
+                        if ((this as any)._callbacks['error']) (this as any)._callbacks['error'](error);
+                    } else {
+                        if ((this as any)._callbacks['end']) (this as any)._callbacks['end'](null, stderr);
+                    }
+                }),
+            };
+            currentFfmpegInstanceMock = instance; // Though not strictly needed for this direct setup
+            return instance;
+        });
+    };
+
     it('should resolve true if mean_volume is audible', async () => {
       const filePath = 'dummy/audible_video.mp4';
-      (ffmpeg as any).mockImplementationOnce(() => {
-          currentFfmpegInstanceMock = {
-            _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
-            on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['end'](null, 'mean_volume: -20.5 dB'); }), // Audible
-          }; return currentFfmpegInstanceMock;
-      });
+      setupAreAudioLevelsAudibleMock('mean_volume: -20.5 dB');
       const sound = await hasSound(filePath);
       expect(sound).toBe(true);
     });
 
     it('should resolve false if mean_volume is too low', async () => {
       const filePath = 'dummy/silent_video.mp4';
-       (ffmpeg as any).mockImplementationOnce(() => {
-          currentFfmpegInstanceMock = {
-             _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
-            on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['end'](null, 'mean_volume: -95.0 dB'); }), // Too low
-          }; return currentFfmpegInstanceMock;
-      });
+      setupAreAudioLevelsAudibleMock('mean_volume: -95.0 dB');
       const sound = await hasSound(filePath);
       expect(sound).toBe(false);
     });
 
     it('should resolve false if mean_volume is not found in stderr', async () => {
       const filePath = 'dummy/no_mean_volume_video.mp4';
-      (ffmpeg as any).mockImplementationOnce(() => {
-          currentFfmpegInstanceMock = {
-            _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
-            on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['end'](null, 'some other stderr output'); }),
-          }; return currentFfmpegInstanceMock;
-      });
+      setupAreAudioLevelsAudibleMock('some other stderr output');
       const sound = await hasSound(filePath);
       expect(sound).toBe(false);
     });
 
     it('should resolve false if stderr is null for volumedetect', async () => {
       const filePath = 'dummy/null_stderr.mp4';
-      (ffmpeg as any).mockImplementationOnce(() => {
-          currentFfmpegInstanceMock = {
-            _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
-            on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['end'](null, null); }), // Null stderr
-          }; return currentFfmpegInstanceMock;
-      });
+      setupAreAudioLevelsAudibleMock(null);
       const sound = await hasSound(filePath);
       expect(sound).toBe(false);
     });
 
-    it('should resolve false if areAudioLevelsAudible encounters an ffmpeg error', async () => {
+    it('should reject if areAudioLevelsAudible encounters an ffmpeg error', async () => {
       const filePath = 'dummy/ffmpeg_error_video.mp4';
       const errorMessage = 'ffmpeg execution error';
-      (ffmpeg as any).mockImplementationOnce(() => {
-          currentFfmpegInstanceMock = {
-            _callbacks: {}, audioFilters: vi.fn().mockReturnThis(), outputOptions: vi.fn().mockReturnThis(), output: vi.fn().mockReturnThis(),
-            on: vi.fn(function(event: string, callback: Function) { (this as any)._callbacks[event] = callback; return this; }),
-            run: vi.fn(function() { (this as any)._callbacks['error'](new Error(errorMessage)); }),
-          }; return currentFfmpegInstanceMock;
-      });
+      setupAreAudioLevelsAudibleMock(null, new Error(errorMessage));
 
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const sound = await hasSound(filePath);
-      expect(sound).toBe(false);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(`Error checking for sound in ${filePath}:`, expect.objectContaining({ message: errorMessage }));
-      consoleErrorSpy.mockRestore();
+      await expect(hasSound(filePath)).rejects.toThrow(errorMessage);
     });
   });
 });

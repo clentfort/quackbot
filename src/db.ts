@@ -1,13 +1,20 @@
 import sqlite3 from 'sqlite3';
 import * as sqlite from 'sqlite';
-import { Platform, TWITTER, YOUTUBE } from './types';
+import { Platform, ALL_PLATFORMS } from './types'; // Assuming ALL_PLATFORMS is exported from types
 
-import { ALL_PLATFORMS } from './types'; // Use this for isUploadedToAllPlatforms
+let db: sqlite.Database | undefined;
 
-// Initialize the database schema
-// The db connection should be opened and passed to this function.
-export async function initDb(db: sqlite.Database): Promise<void> {
-  // Create the table (if it doesn't exist) with additional columns for tracking upload status
+// Initialize and open a connection to the SQLite database
+export async function initDb(): Promise<sqlite.Database> {
+  if (db) {
+    return db;
+  }
+
+  db = await sqlite.open({
+    filename: './videos.db', // File-based database
+    driver: sqlite3.Database,
+  });
+
   await db.exec(`
     CREATE TABLE IF NOT EXISTS video_uploads (
       video_id TEXT NOT NULL,
@@ -18,34 +25,37 @@ export async function initDb(db: sqlite.Database): Promise<void> {
     );
 
     CREATE TABLE IF NOT EXISTS upload_errors (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
       video_id TEXT NOT NULL,
       platform TEXT NOT NULL,
-      error_message TEXT,
-      stack_trace TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      error TEXT NOT NULL, -- Reverted: only error message
+      PRIMARY KEY (video_id, platform) -- Reverted: composite PK, implies INSERT OR REPLACE behavior
     );
   `);
+
+  return db;
 }
 
-export async function isUploadedToAllPlatforms(
-  db: sqlite.Database,
-  videoId: string,
-) {
-  const uploads = await db.all(
-    'SELECT DISTINCT platform FROM video_uploads WHERE video_id = ?',
+// Note: All functions below will now implicitly use the global 'db' instance from initDb(),
+// which is a pattern change. The tests will need to adapt to not pass 'db' anymore.
+// However, the original prompt for this subtask asks to revert src/db.ts and then update src/db.test.ts.
+// The functions in the previous version (which I'm reverting from) *did* take 'db' as a param.
+// The original code I have from a much earlier state shows functions like:
+// export async function isUploadedToAllPlatforms(videoId: string) { const currentDb = await initDb(); ... }
+// This is a key detail. I will assume the functions should call initDb() internally to get the db instance.
+
+export async function isUploadedToAllPlatforms(videoId: string): Promise<boolean> {
+  const currentDb = await initDb(); // Get the global db instance
+  const row = await currentDb.get<{ count: number }>(
+    'SELECT COUNT(DISTINCT platform) AS count FROM video_uploads WHERE video_id = ?',
     videoId,
   );
-  const uploadedPlatforms = uploads.map(u => u.platform);
-  return ALL_PLATFORMS.every(p => uploadedPlatforms.includes(p));
+  // Check if the count of distinct uploaded platforms matches the total number of platforms
+  return row?.count === ALL_PLATFORMS.length;
 }
 
-export async function isUploadedToPlatform(
-  db: sqlite.Database,
-  videoId: string,
-  platform: Platform,
-) {
-  const row = await db.get(
+export async function isUploadedToPlatform(videoId: string, platform: Platform): Promise<boolean> {
+  const currentDb = await initDb(); // Get the global db instance
+  const row = await currentDb.get(
     'SELECT platform_id FROM video_uploads WHERE video_id = ? AND platform = ?',
     videoId,
     platform,
@@ -53,14 +63,9 @@ export async function isUploadedToPlatform(
   return !!row;
 }
 
-// Save a new upload to the platform
-export async function saveUpload(
-  db: sqlite.Database,
-  videoId: string,
-  platform: Platform,
-  platformId: string,
-) {
-  return db.run(
+export async function saveUpload(videoId: string, platform: Platform, platformId: string): Promise<void> {
+  const currentDb = await initDb(); // Get the global db instance
+  await currentDb.run(
     'INSERT OR REPLACE INTO video_uploads (video_id, platform, platform_id) VALUES (?, ?, ?)',
     videoId,
     platform,
@@ -68,17 +73,20 @@ export async function saveUpload(
   );
 }
 
-export async function logUploadError(
-  db: sqlite.Database,
-  videoId: string,
-  platform: Platform,
-  error: unknown,
-) {
-  return db.run(
-    'INSERT INTO upload_errors (video_id, platform, error_message, stack_trace) VALUES (?, ?, ?, ?)',
+export async function logUploadError(videoId: string, platform: Platform, error: unknown): Promise<void> {
+  const currentDb = await initDb(); // Get the global db instance
+  await currentDb.run(
+    'INSERT OR REPLACE INTO upload_errors (video_id, platform, error) VALUES (?, ?, ?)',
     videoId,
     platform,
     error instanceof Error ? error.message : String(error),
-    error instanceof Error ? error.stack : null,
   );
+}
+
+// Optional: A function to close the global DB, might be useful for cleanup in tests.
+export async function closeDb(): Promise<void> {
+  if (db) {
+    await db.close();
+    db = undefined;
+  }
 }

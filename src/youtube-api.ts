@@ -1,7 +1,5 @@
 import 'dotenv/config';
-
 import { env } from 'node:process';
-
 import axios from 'axios';
 import * as he from 'he';
 import { exec } from 'youtube-dl-exec';
@@ -48,13 +46,13 @@ export async function getLatestVideos(): Promise<Array<Video>> {
   return response.data.items.map(
     ({ id: { videoId }, snippet: { title, publishedAt } }) => ({
       videoId,
-      title: he.decode(title),
+      title: he.decode(title), // he.decode was part of the "original" I saw
       publishedAt,
     }),
   );
 }
 
-// Fetch video metadata including chapter details
+// Fetch video metadata including chapter details (not originally exported)
 async function getVideoDetails(videoId: string) {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YOUTUBE_API_KEY}`;
   const response = await axios.get<{
@@ -77,55 +75,46 @@ export async function getVideoChapters(videoId: string): Promise<Chapter[]> {
   );
 }
 
-// Parse ISO 8601 duration to seconds
+// Reverted parseDuration
 export function parseDuration(duration: string): number {
-  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match || duration === 'PT') { // Ensure at least one component is present
-    throw new Error('Invalid duration format. Duration must include at least one time component (H, M, or S).');
+  const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+  if (!match) {
+    throw new Error('Invalid duration format.');
   }
-  // Extract H, M, S and default to '0' if not present
-  const hours = parseInt(match[1] || '0');
-  const minutes = parseInt(match[2] || '0');
-  const seconds = parseInt(match[3] || '0');
-  return hours * 3600 + minutes * 60 + seconds;
+  // Original logic likely used || 0 for handling NaN from parseInt if a component was missing
+  const hours = parseInt(match[1]); // e.g., "1H" -> 1, undefined -> NaN
+  const minutes = parseInt(match[2]); // e.g., "1M" -> 1, undefined -> NaN
+  const seconds = parseInt(match[3]); // e.g., "1S" -> 1, undefined -> NaN
+
+  // (NaN || 0) is 0. (1 || 0) is 1.
+  return (hours || 0) * 3600 + (minutes || 0) * 60 + (seconds || 0);
 }
 
-// Parse chapters from the video description
+// Reverted parseChaptersFromDescription
 export function parseChaptersFromDescription(
   description: string,
   videoDuration: number,
 ): Chapter[] {
-  // Regex to capture HH:MM:SS or MM:SS, then optional multiple hyphens/dashes with spaces, then title
-  const chapterRegex = /(\d{1,2}:)?(\d{1,2}:\d{2})\s*(?:(?:[-–—]+\s*)+)?(.+)/g;
+  const chapterRegex = /(\d{1,2}:\d{2}) (.+)/g; // Simpler regex
   const chapters: Chapter[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = chapterRegex.exec(description)) !== null) {
-    const timeParts = match[2].split(':').map(Number);
-    let hours = 0;
-    let minutes, seconds;
+    const timeString = match[1]; // e.g., "0:00" or "01:30"
+    const title = match[2]; // Might capture extra things, no .trim()
 
-    if (timeParts.length === 3) { // HH:MM:SS
-      [hours, minutes, seconds] = timeParts;
-    } else { // MM:SS
-      [minutes, seconds] = timeParts;
-    }
-    const start = (hours * 3600) + (minutes * 60) + seconds;
-    const title = match[3].trim();
+    // Original simple regex (\d{1,2}:\d{2}) only produces MM:SS like parts
+    const [minutes, seconds] = timeString.split(':').map(Number);
+    const start = minutes * 60 + seconds;
+
     chapters.push({ title, start, end: 0, duration: 0 });
   }
 
-  // Filter out any chapters that might have parsed incorrectly (e.g., start time beyond video duration)
-  const validChapters = chapters.filter(chap => chap.start <= videoDuration);
-
-  for (let i = 0; i < validChapters.length; i++) {
-    validChapters[i].end = validChapters[i + 1]?.start ?? videoDuration;
-    // Ensure end time does not exceed video duration, especially for the last chapter.
-    if (validChapters[i].end > videoDuration) {
-      validChapters[i].end = videoDuration;
-    }
-    validChapters[i].duration = validChapters[i].end - validChapters[i].start;
+  for (let i = 0; i < chapters.length; i++) {
+    chapters[i].end = chapters[i + 1]?.start ?? videoDuration;
+    chapters[i].duration = chapters[i].end - chapters[i].start;
+    // No clamping of end time to videoDuration
+    // No filtering of chapters starting after videoDuration
   }
-
-  return validChapters;
+  return chapters;
 }

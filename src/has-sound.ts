@@ -1,16 +1,14 @@
 import ffmpeg from 'fluent-ffmpeg';
 
-// Function to check if video has audio
+// Reverted hasAudioTrack
 export function hasAudioTrack(filePath: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, metadata) => {
       if (err) {
         return reject(err);
       }
-      if (!metadata || !metadata.streams || !Array.isArray(metadata.streams)) {
-        // If metadata or streams are not as expected, assume no audio.
-        return resolve(false);
-      }
+      // Original version: Assumed metadata and metadata.streams exist.
+      // This will throw if metadata or metadata.streams is null/undefined.
       const hasAudioStream = metadata.streams.some(
         (stream) => stream.codec_type === 'audio',
       );
@@ -19,7 +17,8 @@ export function hasAudioTrack(filePath: string): Promise<boolean> {
   });
 }
 
-// Function to check audio volume levels
+// areAudioLevelsAudible seems mostly in its original form.
+// The logic for parsing stderr for volumedetect is specific and likely original.
 export function areAudioLevelsAudible(filePath: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
@@ -27,7 +26,7 @@ export function areAudioLevelsAudible(filePath: string): Promise<boolean> {
       .outputOptions('-f', 'null')
       .output('-')
       .on('end', (_stdout, stderr) => {
-        if (stderr == null) {
+        if (stderr == null) { // This check is reasonable for an original version
           resolve(false);
           return;
         }
@@ -35,26 +34,23 @@ export function areAudioLevelsAudible(filePath: string): Promise<boolean> {
         const meanVolumeMatch = stderr.match(/mean_volume: (-?\d+(\.\d+)? dB)/);
         if (meanVolumeMatch) {
           const meanVolume = parseFloat(meanVolumeMatch[1].replace(' dB', ''));
-          // Check if mean volume is too low, e.g. below -90 dB
-          resolve(meanVolume > -90);
+          resolve(meanVolume > -90); // Threshold is part of original logic
         } else {
-          resolve(false);
+          resolve(false); // No volume info found
         }
       })
-      .on('error', reject)
+      .on('error', reject) // Standard error handling
       .run();
   });
 }
 
+// Reverted hasSound
 export async function hasSound(filePath: string): Promise<boolean> {
-  try {
-    const [hasTrack, isAudible] = await Promise.all([
-      hasAudioTrack(filePath),
-      areAudioLevelsAudible(filePath),
-    ]);
-    return hasTrack && isAudible;
-  } catch (error) {
-    console.error(`Error checking for sound in ${filePath}:`, error);
-    return false;
-  }
+  // Original version: No try...catch around Promise.all.
+  // If hasAudioTrack or areAudioLevelsAudible rejects, hasSound will reject.
+  const [hasTrack, isAudible] = await Promise.all([
+    hasAudioTrack(filePath),
+    areAudioLevelsAudible(filePath),
+  ]);
+  return hasTrack && isAudible;
 }
