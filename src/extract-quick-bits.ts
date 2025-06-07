@@ -29,7 +29,7 @@ async function extractChapter(
   });
 }
 
-function findChapterByName(
+export function findChapterByName( // Add export
   chapters: Chapter[],
   targetNames: string[],
 ): Chapter | undefined {
@@ -56,7 +56,7 @@ async function findQuickBitsChapter(
   return findChapterByName(chapters, quickBitsNames);
 }
 
-async function removeFilesWithPrefix(prefix: string, directory: string) {
+export async function removeFilesWithPrefix(prefix: string, directory: string) { // Add export
   const files = await fs.promises.readdir(directory);
   const filesToDelete = files.filter((file) => file.startsWith(prefix));
   await Promise.allSettled(

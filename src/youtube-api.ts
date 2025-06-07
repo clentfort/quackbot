@@ -78,7 +78,7 @@ export async function getVideoChapters(videoId: string): Promise<Chapter[]> {
 }
 
 // Parse ISO 8601 duration to seconds
-function parseDuration(duration: string): number {
+export function parseDuration(duration: string): number { // Added export
   const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
   if (!match) {
     throw new Error('Invalid duration format.');
@@ -90,7 +90,7 @@ function parseDuration(duration: string): number {
 }
 
 // Parse chapters from the video description
-function parseChaptersFromDescription(
+export function parseChaptersFromDescription( // Added export
   description: string,
   videoDuration: number,
 ): Chapter[] {

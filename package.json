@@ -1,9 +1,11 @@
 {
   "name": "quackbot",
   "version": "1.0.0",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "test": "find ./src -name '*.test.ts' -print0 | xargs -0 node --loader ts-node/esm --test",
     "get-youtube-tokens": "./scripts/get-youtube-tokens.mjs"
   },
   "keywords": [],
@@ -28,6 +30,7 @@
     "@types/fluent-ffmpeg": "^2.1.26",
     "@types/node-cron": "^3.0.11",
     "prettier": "^3.3.3",
+    "ts-node": "^10.9.2",
     "typescript": "^5.6.2"
   }
 }
