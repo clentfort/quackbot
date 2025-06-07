@@ -2,21 +2,11 @@ import sqlite3 from 'sqlite3';
 import * as sqlite from 'sqlite';
 import { Platform, TWITTER, YOUTUBE } from './types';
 
-const ALL_PLATFORMS: Platform[] = [TWITTER, YOUTUBE];
+import { ALL_PLATFORMS } from './types'; // Use this for isUploadedToAllPlatforms
 
-let db: sqlite.Database | undefined;
-
-// Initialize and open a connection to the SQLite database
-export async function initDb(): Promise<sqlite.Database> {
-  if (db) {
-    return db;
-  }
-
-  db = await sqlite.open({
-    filename: './videos.db',
-    driver: sqlite3.Database,
-  });
-
+// Initialize the database schema
+// The db connection should be opened and passed to this function.
+export async function initDb(db: sqlite.Database): Promise<void> {
   // Create the table (if it doesn't exist) with additional columns for tracking upload status
   await db.exec(`
     CREATE TABLE IF NOT EXISTS video_uploads (
@@ -28,27 +18,26 @@ export async function initDb(): Promise<sqlite.Database> {
     );
 
     CREATE TABLE IF NOT EXISTS upload_errors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       video_id TEXT NOT NULL,
       platform TEXT NOT NULL,
-      platform_id TEXT NOT NULL,
-      error TEXT NOT NULL,
-      PRIMARY KEY (video_id, platform)
+      error_message TEXT,
+      stack_trace TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
-
-  return db;
 }
 
 export async function isUploadedToAllPlatforms(
   db: sqlite.Database,
   videoId: string,
 ) {
-  const row = await db.get<{ count: number }>(
-    'SELECT COUNT(1) AS count FROM video_uploads WHERE video_id = ?',
+  const uploads = await db.all(
+    'SELECT DISTINCT platform FROM video_uploads WHERE video_id = ?',
     videoId,
   );
-
-  return row?.count === ALL_PLATFORMS.length;
+  const uploadedPlatforms = uploads.map(u => u.platform);
+  return ALL_PLATFORMS.every(p => uploadedPlatforms.includes(p));
 }
 
 export async function isUploadedToPlatform(
@@ -86,9 +75,10 @@ export async function logUploadError(
   error: unknown,
 ) {
   return db.run(
-    'INSERT OR REPLACE INTO upload_errors (video_id, platform, error) VALUES (?, ?, ?)',
+    'INSERT INTO upload_errors (video_id, platform, error_message, stack_trace) VALUES (?, ?, ?, ?)',
     videoId,
     platform,
     error instanceof Error ? error.message : String(error),
+    error instanceof Error ? error.stack : null,
   );
 }

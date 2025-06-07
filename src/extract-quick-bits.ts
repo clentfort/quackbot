@@ -29,17 +29,59 @@ async function extractChapter(
   });
 }
 
-function findChapterByName(
+export function findChapterByName(
   chapters: Chapter[],
   targetNames: string[],
 ): Chapter | undefined {
-  const normalizedNames = targetNames.map((name) => name.toLowerCase());
+  if (!chapters.length || !targetNames.length) {
+    return undefined;
+  }
 
-  return chapters.find((chapter) =>
-    normalizedNames.some((target) =>
+  const normalizedTargetNames = targetNames.map((name) => name.toLowerCase());
+
+  // Priority 1: Exact match (case-insensitive) - longest target string takes precedence
+  let bestExactMatch: Chapter | undefined = undefined;
+  let longestTargetMatchLength = 0;
+
+  // Iterate through chapters first to maintain chapter order for identical target match lengths
+  for (const chapter of chapters) {
+    const chapterTitleLower = chapter.title.toLowerCase();
+    for (const target of normalizedTargetNames) {
+      if (chapterTitleLower === target) {
+        if (target.length > longestTargetMatchLength) {
+          longestTargetMatchLength = target.length;
+          bestExactMatch = chapter;
+        }
+        // If target lengths are equal, the chapter found first (outer loop) is kept.
+        // This implicitly handles preferring earlier chapters if multiple targets of the same (longest) length match them.
+      }
+    }
+  }
+  if (bestExactMatch) {
+    return bestExactMatch;
+  }
+
+  // Priority 2: Target name is a substring of chapter title (case-insensitive)
+  for (const target of normalizedTargetNames) {
+    const foundChapter = chapters.find((chapter) =>
       chapter.title.toLowerCase().includes(target),
-    ),
-  );
+    );
+    if (foundChapter) {
+      return foundChapter;
+    }
+  }
+
+  // Priority 3: Chapter title is a substring of target name (case-insensitive)
+  for (const target of normalizedTargetNames) {
+    const foundChapter = chapters.find((chapter) =>
+      target.includes(chapter.title.toLowerCase()),
+    );
+    if (foundChapter) {
+      return foundChapter;
+    }
+  }
+
+  return undefined;
 }
 
 async function findQuickBitsChapter(

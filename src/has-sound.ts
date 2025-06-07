@@ -7,6 +7,10 @@ export function hasAudioTrack(filePath: string): Promise<boolean> {
       if (err) {
         return reject(err);
       }
+      if (!metadata || !metadata.streams || !Array.isArray(metadata.streams)) {
+        // If metadata or streams are not as expected, assume no audio.
+        return resolve(false);
+      }
       const hasAudioStream = metadata.streams.some(
         (stream) => stream.codec_type === 'audio',
       );
@@ -43,9 +47,14 @@ export function areAudioLevelsAudible(filePath: string): Promise<boolean> {
 }
 
 export async function hasSound(filePath: string): Promise<boolean> {
-  const [hasTrack, isAudible] = await Promise.all([
-    hasAudioTrack(filePath),
-    areAudioLevelsAudible(filePath),
-  ]);
-  return hasTrack && isAudible;
+  try {
+    const [hasTrack, isAudible] = await Promise.all([
+      hasAudioTrack(filePath),
+      areAudioLevelsAudible(filePath),
+    ]);
+    return hasTrack && isAudible;
+  } catch (error) {
+    console.error(`Error checking for sound in ${filePath}:`, error);
+    return false;
+  }
 }

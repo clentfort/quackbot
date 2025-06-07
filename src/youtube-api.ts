@@ -78,36 +78,54 @@ export async function getVideoChapters(videoId: string): Promise<Chapter[]> {
 }
 
 // Parse ISO 8601 duration to seconds
-function parseDuration(duration: string): number {
-  const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-  if (!match) {
-    throw new Error('Invalid duration format.');
+export function parseDuration(duration: string): number {
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match || duration === 'PT') { // Ensure at least one component is present
+    throw new Error('Invalid duration format. Duration must include at least one time component (H, M, or S).');
   }
-  const hours = parseInt(match[1]) ?? 0;
-  const minutes = parseInt(match[2]) ?? 0;
-  const seconds = parseInt(match[3]) ?? 0;
+  // Extract H, M, S and default to '0' if not present
+  const hours = parseInt(match[1] || '0');
+  const minutes = parseInt(match[2] || '0');
+  const seconds = parseInt(match[3] || '0');
   return hours * 3600 + minutes * 60 + seconds;
 }
 
 // Parse chapters from the video description
-function parseChaptersFromDescription(
+export function parseChaptersFromDescription(
   description: string,
   videoDuration: number,
 ): Chapter[] {
-  const chapterRegex = /(\d{1,2}:\d{2}) (.+)/g;
+  // Regex to capture HH:MM:SS or MM:SS, then optional multiple hyphens/dashes with spaces, then title
+  const chapterRegex = /(\d{1,2}:)?(\d{1,2}:\d{2})\s*(?:(?:[-–—]+\s*)+)?(.+)/g;
   const chapters: Chapter[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = chapterRegex.exec(description)) !== null) {
-    const [minutes, seconds] = match[1].split(':').map(Number);
-    const start = minutes * 60 + seconds;
-    chapters.push({ title: match[2], start, end: 0, duration: 0 });
+    const timeParts = match[2].split(':').map(Number);
+    let hours = 0;
+    let minutes, seconds;
+
+    if (timeParts.length === 3) { // HH:MM:SS
+      [hours, minutes, seconds] = timeParts;
+    } else { // MM:SS
+      [minutes, seconds] = timeParts;
+    }
+    const start = (hours * 3600) + (minutes * 60) + seconds;
+    const title = match[3].trim();
+    chapters.push({ title, start, end: 0, duration: 0 });
   }
 
-  for (let i = 0; i < chapters.length; i++) {
-    chapters[i].end = chapters[i + 1]?.start ?? videoDuration;
-    chapters[i].duration = chapters[i].end - chapters[i].start;
+  // Filter out any chapters that might have parsed incorrectly (e.g., start time beyond video duration)
+  const validChapters = chapters.filter(chap => chap.start <= videoDuration);
+
+  for (let i = 0; i < validChapters.length; i++) {
+    validChapters[i].end = validChapters[i + 1]?.start ?? videoDuration;
+    // Ensure end time does not exceed video duration, especially for the last chapter.
+    if (validChapters[i].end > videoDuration) {
+      validChapters[i].end = videoDuration;
+    }
+    validChapters[i].duration = validChapters[i].end - validChapters[i].start;
   }
 
-  return chapters;
+  return validChapters;
 }
