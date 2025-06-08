@@ -15,7 +15,7 @@
   "regexManagers": [
     {
       "fileMatch": ["(^|/)Dockerfile$"],
-      "matchStrings": ["FROM node:(.*?)-alpine"],
+      "matchStrings": ["FROM node:(?<currentValue>.*?)-alpine"],
       "depNameTemplate": "node",
       "datasourceTemplate": "npm"
     }
