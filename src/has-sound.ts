@@ -7,10 +7,11 @@ export function hasAudioTrack(filePath: string): Promise<boolean> {
       if (err) {
         return reject(err);
       }
-      const hasAudioStream = metadata.streams.some(
-        (stream) => stream.codec_type === 'audio',
-      );
-      resolve(hasAudioStream);
+      const hasAudioStream =
+        metadata &&
+        metadata.streams &&
+        metadata.streams.some((stream: any) => stream.codec_type === 'audio');
+      resolve(!!hasAudioStream); // Ensure boolean if metadata or streams are null/undefined
     });
   });
 }

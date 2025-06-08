@@ -2,7 +2,8 @@ import sqlite3 from 'sqlite3';
 import * as sqlite from 'sqlite';
 import { Platform, TWITTER, YOUTUBE } from './types';
 
-const ALL_PLATFORMS: Platform[] = [TWITTER, YOUTUBE];
+export const ALL_PLATFORMS: Platform[] = [TWITTER, YOUTUBE];
+export { TWITTER, YOUTUBE }; // Re-export for use in tests
 
 let db: sqlite.Database | undefined;
 
@@ -86,6 +87,8 @@ export async function logUploadError(
   error: unknown,
 ) {
   return db.run(
+    // This is the original SQL that does not include platform_id,
+    // which is NOT NULL in the table, so this INSERT is expected to fail.
     'INSERT OR REPLACE INTO upload_errors (video_id, platform, error) VALUES (?, ?, ?)',
     videoId,
     platform,

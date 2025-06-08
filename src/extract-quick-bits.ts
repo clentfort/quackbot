@@ -29,7 +29,7 @@ async function extractChapter(
   });
 }
 
-function findChapterByName(
+export function findChapterByName(
   chapters: Chapter[],
   targetNames: string[],
 ): Chapter | undefined {
