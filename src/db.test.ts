@@ -9,7 +9,7 @@ import {
   logUploadError,
   TWITTER,
   YOUTUBE,
-  PLATFORMS,
+  ALL_PLATFORMS,
 } from '../src/db'; // Assuming PLATFORMS is exported or reconstruct it
 import type { Database } from 'sqlite';
 
@@ -95,11 +95,11 @@ describe('db.ts', () => {
     const videoId2 = 'onePlatformVideo';
     const platformId = 'platformSpecificId';
     // Assuming PLATFORMS constant contains all relevant platforms, e.g. [TWITTER, YOUTUBE]
-    // If PLATFORMS is not exported from db.ts, define it locally for the test.
-    const currentPlatforms = [TWITTER, YOUTUBE]; // Or import PLATFORMS from '../src/db' if available
+    // If ALL_PLATFORMS is not exported from db.ts, define it locally for the test.
+    // const currentPlatforms = [TWITTER, YOUTUBE]; // Or import ALL_PLATFORMS from '../src/db' if available
 
     it('should return true if video is uploaded to all defined platforms', async () => {
-      for (const platform of currentPlatforms) {
+      for (const platform of ALL_PLATFORMS) {
         await saveUpload(dbInstance, videoId1, platform, platformId);
       }
       expect(await isUploadedToAllPlatforms(dbInstance, videoId1)).toBe(true);
