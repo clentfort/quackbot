@@ -1,5 +1,7 @@
 import 'dotenv/config';
+
 import { env } from 'node:process';
+
 import axios from 'axios';
 import * as he from 'he';
 import { exec } from 'youtube-dl-exec';
@@ -46,13 +48,13 @@ export async function getLatestVideos(): Promise<Array<Video>> {
   return response.data.items.map(
     ({ id: { videoId }, snippet: { title, publishedAt } }) => ({
       videoId,
-      title: he.decode(title), // he.decode was part of the "original" I saw
+      title: he.decode(title),
       publishedAt,
     }),
   );
 }
 
-// Fetch video metadata including chapter details (not originally exported)
+// Fetch video metadata including chapter details
 async function getVideoDetails(videoId: string) {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YOUTUBE_API_KEY}`;
   const response = await axios.get<{
@@ -75,46 +77,38 @@ export async function getVideoChapters(videoId: string): Promise<Chapter[]> {
   );
 }
 
-// Reverted parseDuration
+// Parse ISO 8601 duration to seconds
 export function parseDuration(duration: string): number {
   const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
   if (!match) {
     throw new Error('Invalid duration format.');
   }
-  // Original logic likely used || 0 for handling NaN from parseInt if a component was missing
-  const hours = parseInt(match[1]); // e.g., "1H" -> 1, undefined -> NaN
-  const minutes = parseInt(match[2]); // e.g., "1M" -> 1, undefined -> NaN
-  const seconds = parseInt(match[3]); // e.g., "1S" -> 1, undefined -> NaN
-
-  // (NaN || 0) is 0. (1 || 0) is 1.
-  return (hours || 0) * 3600 + (minutes || 0) * 60 + (seconds || 0);
+  // Extract the numeric part and default to 0 if undefined or NaN
+  const hours = parseInt(match[1]?.replace('H', '')) || 0;
+  const minutes = parseInt(match[2]?.replace('M', '')) || 0;
+  const seconds = parseInt(match[3]?.replace('S', '')) || 0;
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
-// Reverted parseChaptersFromDescription
+// Parse chapters from the video description
 export function parseChaptersFromDescription(
   description: string,
   videoDuration: number,
 ): Chapter[] {
-  const chapterRegex = /(\d{1,2}:\d{2}) (.+)/g; // Simpler regex
+  const chapterRegex = /(\d{1,2}:\d{2}) (.+)/g;
   const chapters: Chapter[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = chapterRegex.exec(description)) !== null) {
-    const timeString = match[1]; // e.g., "0:00" or "01:30"
-    const title = match[2]; // Might capture extra things, no .trim()
-
-    // Original simple regex (\d{1,2}:\d{2}) only produces MM:SS like parts
-    const [minutes, seconds] = timeString.split(':').map(Number);
+    const [minutes, seconds] = match[1].split(':').map(Number);
     const start = minutes * 60 + seconds;
-
-    chapters.push({ title, start, end: 0, duration: 0 });
+    chapters.push({ title: match[2], start, end: 0, duration: 0 });
   }
 
   for (let i = 0; i < chapters.length; i++) {
     chapters[i].end = chapters[i + 1]?.start ?? videoDuration;
     chapters[i].duration = chapters[i].end - chapters[i].start;
-    // No clamping of end time to videoDuration
-    // No filtering of chapters starting after videoDuration
   }
+
   return chapters;
 }
