@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, Mock } from 'vitest';
 import {
   hasAudioTrack,
   areAudioLevelsAudible,
@@ -17,21 +17,36 @@ let ffmpegInstanceErrorCallback: ((err: Error) => void) | null = null;
 
 // This object holds the state and mock methods for the ffmpeg instance.
 // Tests will configure this object.
-const ffmpegInstanceConfig = {
+
+// Define an interface for the mock ffmpeg instance to type `this`
+interface MockFfmpegInstance {
+  _shouldSucceed: boolean;
+  _stderr: string;
+  _stdout: string;
+  _errorMessage: string;
+  audioFilters: Mock<() => MockFfmpegInstance>;
+  outputOptions: Mock<() => MockFfmpegInstance>;
+  output: Mock<() => MockFfmpegInstance>;
+  on: Mock<(event: string, callback: (...args: any[]) => void) => MockFfmpegInstance>;
+  run: Mock<() => void>;
+  // Add any other methods or properties that are accessed on this mock
+}
+
+const ffmpegInstanceConfig: MockFfmpegInstance = {
   _shouldSucceed: true,
   _stderr: '',
   _stdout: '',
   _errorMessage: 'Simulated ffmpeg process error',
-  audioFilters: vi.fn(function () {
+  audioFilters: vi.fn(function (this: MockFfmpegInstance) {
     return this;
   }),
-  outputOptions: vi.fn(function () {
+  outputOptions: vi.fn(function (this: MockFfmpegInstance) {
     return this;
   }),
-  output: vi.fn(function () {
+  output: vi.fn(function (this: MockFfmpegInstance) {
     return this;
   }),
-  on: vi.fn(function (event: string, callback: (...args: any[]) => void) {
+  on: vi.fn(function (this: MockFfmpegInstance, event: string, callback: (...args: any[]) => void) {
     if (event === 'end') {
       ffmpegInstanceEndCallback = callback as (
         stdout: string,

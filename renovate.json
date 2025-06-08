@@ -7,9 +7,17 @@
   },
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true
+    }
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": ["(^|/)Dockerfile$"],
+      "matchStrings": ["FROM node:(.*?)-alpine"],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "npm"
     }
   ]
 }
