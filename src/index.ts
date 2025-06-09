@@ -91,3 +91,5 @@ function exit() {
 
 process.on('SIGINT', exit);
 process.on('SIGTERM', exit);
+
+export { main, MAX_VIDEOS_PER_DAY };
