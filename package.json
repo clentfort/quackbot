@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc",
     "get-youtube-tokens": "./scripts/get-youtube-tokens.mjs",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage src"
   },
   "keywords": [],
   "author": "",
