@@ -69,7 +69,6 @@ export async function downloadVideo(videoUrl: string, output: string) {
     output,
     quiet: true,
     format: 'b[ext=mp4]',
-    jsRuntimes: 'node',
   });
 }
 
