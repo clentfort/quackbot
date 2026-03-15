@@ -31,7 +31,7 @@ export async function initDb(): Promise<sqlite.Database> {
     CREATE TABLE IF NOT EXISTS upload_errors (
       video_id TEXT NOT NULL,
       platform TEXT NOT NULL,
-      platform_id TEXT NOT NULL,
+      platform_id TEXT,
       error TEXT NOT NULL,
       PRIMARY KEY (video_id, platform)
     );
@@ -87,8 +87,6 @@ export async function logUploadError(
   error: unknown,
 ) {
   return db.run(
-    // This is the original SQL that does not include platform_id,
-    // which is NOT NULL in the table, so this INSERT is expected to fail.
     'INSERT OR REPLACE INTO upload_errors (video_id, platform, error) VALUES (?, ?, ?)',
     videoId,
     platform,
