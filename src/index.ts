@@ -6,10 +6,12 @@ import path from 'node:path';
 import cron from 'node-cron';
 import he from 'he';
 
-import { initDb, isUploadedToAllPlatforms } from './db';
+import { initDb, shouldProcessVideo } from './db';
 import { extractQuickBitsChapter } from './extract-quick-bits';
 import { uploadToPlatforms } from './upload-to-platforms';
 import { getLatestVideos, Video } from './youtube-api';
+import { logger } from './logger';
+import { updateHassStatus } from './hass';
 
 async function loadExtraVideos() {
   const videosRaw = fs.readFileSync(
@@ -30,9 +32,10 @@ let videosUploadedToday = 0;
 let runs = 0;
 async function main() {
   runs++;
+  await updateHassStatus({ state: 'Processing', attributes: { runs } });
   const db = await initDb();
   let [videos, extraVideos] = await Promise.all([
-    getLatestVideos(),
+    getLatestVideos(50),
     loadExtraVideos(),
   ]);
 
@@ -40,42 +43,68 @@ async function main() {
 
   // Last run of the day
   if (isLastRunOfTheDay) {
-    console.log('Last run of the day, trying to process all videos');
+    logger.log('Last run of the day, trying to process all videos');
     videos = [...videos, ...extraVideos];
   } else {
-    console.log(`Processing latest videos, run ${runs}`);
+    logger.log(`Processing latest videos, run ${runs}`);
   }
+
+  // Reverse videos to process oldest first (backlog first)
+  videos.reverse();
+
+  let processedCount = 0;
+  let skippedCount = 0;
 
   for (const video of videos) {
     if (videosUploadedToday >= MAX_VIDEOS_PER_DAY) {
+      logger.log('Daily upload limit reached');
       break;
     }
 
-    const needsToBeProcessed = await isUploadedToAllPlatforms(
-      db,
-      video.videoId,
-    );
+    const canBeProcessed = await shouldProcessVideo(db, video.videoId);
 
-    if (needsToBeProcessed) {
+    if (!canBeProcessed) {
+      skippedCount++;
       continue;
     }
 
     try {
-      console.log(`Processing video ${video.videoId} - ${video.title}`);
+      logger.log(`Processing video ${video.videoId} - ${video.title}`);
+      await updateHassStatus({
+        state: 'Processing Video',
+        attributes: { videoId: video.videoId, title: video.title },
+      });
       for await (const clip of extractQuickBitsChapter(video)) {
         await uploadToPlatforms(clip);
       }
       videosUploadedToday++;
+      processedCount++;
     } catch (error) {
-      console.log(
+      logger.error(
         `Error handling video ${video.videoId} - ${video.title}:`,
         error,
       );
     }
   }
 
+  logger.log(`Run summary:
+    Total checked: ${processedCount + skippedCount}
+    Processed: ${processedCount}
+    Skipped: ${skippedCount}
+  `);
+
+  await updateHassStatus({
+    state: 'Idle',
+    attributes: {
+      last_run_total: processedCount + skippedCount,
+      last_run_processed: processedCount,
+      last_run_skipped: skippedCount,
+      videos_uploaded_today: videosUploadedToday,
+    },
+  });
+
   if (isLastRunOfTheDay) {
-    console.log(`Videos uploaded today: ${videosUploadedToday}`);
+    logger.log(`Videos uploaded today: ${videosUploadedToday}`);
     videosUploadedToday = 0;
     runs = 0;
   }

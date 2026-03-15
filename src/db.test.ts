@@ -6,6 +6,7 @@ import {
   saveUpload,
   isUploadedToPlatform,
   isUploadedToAllPlatforms,
+  shouldProcessVideo,
   logUploadError,
   TWITTER,
   YOUTUBE,
@@ -124,16 +125,25 @@ describe('db.ts', () => {
     const errorMessage = 'Test error message';
     const errorObject = new Error('Test Error Object');
 
-    it('should successfully log an error message', async () => {
+    it('should successfully log an error message and increment attempts', async () => {
       await logUploadError(dbInstance, videoId, TWITTER, errorMessage);
-      const row = await dbInstance.get(
+      let row = await dbInstance.get(
         'SELECT * FROM upload_errors WHERE video_id = ? AND platform = ?',
         videoId,
         TWITTER,
       );
       expect(row).toBeDefined();
       expect(row.error).toBe(errorMessage);
-      expect(row.platform_id).toBeNull();
+      expect(row.attempts).toBe(1);
+
+      await logUploadError(dbInstance, videoId, TWITTER, 'Second error');
+      row = await dbInstance.get(
+        'SELECT * FROM upload_errors WHERE video_id = ? AND platform = ?',
+        videoId,
+        TWITTER,
+      );
+      expect(row.attempts).toBe(2);
+      expect(row.error).toBe('Second error');
     });
 
     it('should successfully log an Error object', async () => {
@@ -145,19 +155,29 @@ describe('db.ts', () => {
       );
       expect(row).toBeDefined();
       expect(row.error).toBe(errorObject.message);
-      expect(row.platform_id).toBeNull();
+    });
+  });
+
+  describe('shouldProcessVideo', () => {
+    const videoId = 'processVideo';
+
+    it('should return true if not uploaded and no errors', async () => {
+      expect(await shouldProcessVideo(dbInstance, videoId)).toBe(true);
     });
 
-    it('should successfully log a long error message', async () => {
-      const longErrorMessage = 'a'.repeat(1000);
-      await logUploadError(dbInstance, videoId, TWITTER, longErrorMessage);
-      const row = await dbInstance.get(
-        'SELECT * FROM upload_errors WHERE video_id = ? AND platform = ?',
-        videoId,
-        TWITTER,
-      );
-      expect(row).toBeDefined();
-      expect(row.error).toBe(longErrorMessage);
+    it('should return false if uploaded to all platforms', async () => {
+      for (const platform of ALL_PLATFORMS) {
+        await saveUpload(dbInstance, videoId, platform, 'id');
+      }
+      expect(await shouldProcessVideo(dbInstance, videoId)).toBe(false);
+    });
+
+    it('should return false if any platform has 3 or more attempts', async () => {
+      const videoId2 = 'failingVideo';
+      await logUploadError(dbInstance, videoId2, TWITTER, 'err');
+      await logUploadError(dbInstance, videoId2, TWITTER, 'err');
+      await logUploadError(dbInstance, videoId2, TWITTER, 'err');
+      expect(await shouldProcessVideo(dbInstance, videoId2)).toBe(false);
     });
   });
 });

@@ -39,8 +39,10 @@ export interface Chapter {
 }
 
 // Fetch latest videos from the channel
-export async function getLatestVideos(): Promise<Array<Video>> {
-  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=5`;
+export async function getLatestVideos(
+  maxResults = 50,
+): Promise<Array<Video>> {
+  const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=${maxResults}`;
   const response = await axios.get<{
     items: Array<YoutubeId & YoutubeSnippet>;
   }>(url);
