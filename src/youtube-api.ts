@@ -65,7 +65,12 @@ async function getVideoDetails(videoId: string) {
 
 // Download a video using youtube-dl
 export async function downloadVideo(videoUrl: string, output: string) {
-  return exec(videoUrl, { output, quiet: true, format: 'mp4' });
+  return exec(videoUrl, {
+    output,
+    quiet: true,
+    format: 'b[ext=mp4]',
+    jsRuntimes: 'node',
+  });
 }
 
 export async function getVideoChapters(videoId: string): Promise<Chapter[]> {

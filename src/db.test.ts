@@ -123,38 +123,41 @@ describe('db.ts', () => {
     const videoId = 'errorVideoXYZ';
     const errorMessage = 'Test error message';
     const errorObject = new Error('Test Error Object');
-    // const platformId = 'platformSpecificId'; // Not used by logUploadError signature
 
-    it('should attempt to log an error and fail due to NOT NULL constraint on platform_id', async () => {
-      try {
-        await logUploadError(dbInstance, videoId, TWITTER, errorMessage);
-        // If the error wasn't thrown, this test should fail.
-        expect(true).toBe(false);
-      } catch (e: any) {
-        expect(e.message).toContain('NOT NULL constraint failed');
-        expect(e.message).toContain('upload_errors.platform_id');
-      }
+    it('should successfully log an error message', async () => {
+      await logUploadError(dbInstance, videoId, TWITTER, errorMessage);
+      const row = await dbInstance.get(
+        'SELECT * FROM upload_errors WHERE video_id = ? AND platform = ?',
+        videoId,
+        TWITTER,
+      );
+      expect(row).toBeDefined();
+      expect(row.error).toBe(errorMessage);
+      expect(row.platform_id).toBeNull();
     });
 
-    it('should attempt to log an Error object and fail due to NOT NULL constraint', async () => {
-      try {
-        await logUploadError(dbInstance, videoId, YOUTUBE, errorObject);
-        expect(true).toBe(false); // Should not reach here
-      } catch (e: any) {
-        expect(e.message).toContain('NOT NULL constraint failed');
-        expect(e.message).toContain('upload_errors.platform_id');
-      }
+    it('should successfully log an Error object', async () => {
+      await logUploadError(dbInstance, videoId, YOUTUBE, errorObject);
+      const row = await dbInstance.get(
+        'SELECT * FROM upload_errors WHERE video_id = ? AND platform = ?',
+        videoId,
+        YOUTUBE,
+      );
+      expect(row).toBeDefined();
+      expect(row.error).toBe(errorObject.message);
+      expect(row.platform_id).toBeNull();
     });
 
-    it('should attempt to log a long error message and fail due to NOT NULL constraint', async () => {
+    it('should successfully log a long error message', async () => {
       const longErrorMessage = 'a'.repeat(1000);
-      try {
-        await logUploadError(dbInstance, videoId, TWITTER, longErrorMessage);
-        expect(true).toBe(false); // Should not reach here
-      } catch (e: any) {
-        expect(e.message).toContain('NOT NULL constraint failed');
-        expect(e.message).toContain('upload_errors.platform_id');
-      }
+      await logUploadError(dbInstance, videoId, TWITTER, longErrorMessage);
+      const row = await dbInstance.get(
+        'SELECT * FROM upload_errors WHERE video_id = ? AND platform = ?',
+        videoId,
+        TWITTER,
+      );
+      expect(row).toBeDefined();
+      expect(row.error).toBe(longErrorMessage);
     });
   });
 });
