@@ -33,11 +33,44 @@ export async function initDb(): Promise<sqlite.Database> {
       platform TEXT NOT NULL,
       platform_id TEXT,
       error TEXT NOT NULL,
+      attempts INTEGER DEFAULT 1,
       PRIMARY KEY (video_id, platform)
     );
   `);
 
+  // Handle existing databases that might not have the 'attempts' column
+  try {
+    await db.exec('ALTER TABLE upload_errors ADD COLUMN attempts INTEGER DEFAULT 1');
+  } catch (error) {
+    // Column might already exist, ignore error
+  }
+
   return db;
+}
+
+export async function shouldProcessVideo(
+  db: sqlite.Database,
+  videoId: string,
+) {
+  const uploadedCount = await db.get<{ count: number }>(
+    'SELECT COUNT(1) AS count FROM video_uploads WHERE video_id = ?',
+    videoId,
+  );
+
+  if (uploadedCount?.count === ALL_PLATFORMS.length) {
+    return false;
+  }
+
+  const errorCount = await db.get<{ count: number }>(
+    'SELECT COUNT(1) AS count FROM upload_errors WHERE video_id = ? AND attempts >= 3',
+    videoId,
+  );
+
+  if (errorCount && errorCount.count > 0) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function isUploadedToAllPlatforms(
@@ -86,10 +119,26 @@ export async function logUploadError(
   platform: Platform,
   error: unknown,
 ) {
-  return db.run(
-    'INSERT OR REPLACE INTO upload_errors (video_id, platform, error) VALUES (?, ?, ?)',
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const existingError = await db.get(
+    'SELECT attempts FROM upload_errors WHERE video_id = ? AND platform = ?',
     videoId,
     platform,
-    error instanceof Error ? error.message : String(error),
+  );
+
+  if (existingError) {
+    return db.run(
+      'UPDATE upload_errors SET error = ?, attempts = attempts + 1 WHERE video_id = ? AND platform = ?',
+      errorMessage,
+      videoId,
+      platform,
+    );
+  }
+
+  return db.run(
+    'INSERT INTO upload_errors (video_id, platform, error, attempts) VALUES (?, ?, ?, 1)',
+    videoId,
+    platform,
+    errorMessage,
   );
 }

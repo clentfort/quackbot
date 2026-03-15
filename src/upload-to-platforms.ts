@@ -2,6 +2,8 @@ import { initDb, isUploadedToPlatform, logUploadError, saveUpload } from './db';
 import { Clip, Platform, TWITTER, YOUTUBE } from './types';
 import { uploadToTwitter } from './upload-to-twitter';
 import { uploadToYoutube } from './upload-to-youtube';
+import { logger } from './logger';
+import { sendHassNotification } from './hass';
 
 type PlatformUpload = (clip: Clip) => Promise<string>;
 
@@ -29,13 +31,16 @@ export async function uploadToPlatforms(
       let uploadId: string;
       try {
         uploadId = await upload(clip);
-        console.log(`Video uploaded successfully to ${platform}: ${uploadId}`);
+        logger.log(`Video uploaded successfully to ${platform}: ${uploadId}`);
         await saveUpload(db, clip.id, platform, uploadId);
         return [true, platform, uploadId];
       } catch (error) {
         const message = error instanceof Error ? error.message : error;
-        console.error(`Error uploading video to ${platform}:`, message);
+        logger.error(`Error uploading video to ${platform}:`, message);
         await logUploadError(db, clip.id, platform, error);
+        if (message === 'Quota Exceeded' || String(message).includes('auth')) {
+          await sendHassNotification(`Critical upload error on ${platform}: ${message}`);
+        }
         return [false, platform];
       }
     }),

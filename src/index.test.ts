@@ -5,12 +5,24 @@ import * as db from './db';
 import * as extractQuickBits from './extract-quick-bits';
 import * as uploadToPlatforms from './upload-to-platforms';
 import * as youtubeApi from './youtube-api';
+import * as loggerModule from './logger';
+import * as hassModule from './hass';
 import fs from 'node:fs';
 
 vi.mock('./db');
 vi.mock('./extract-quick-bits');
 vi.mock('./upload-to-platforms');
 vi.mock('./youtube-api');
+vi.mock('./logger', () => ({
+  logger: {
+    log: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+vi.mock('./hass', () => ({
+  updateHassStatus: vi.fn(),
+  sendHassNotification: vi.fn(),
+}));
 vi.mock('node:fs');
 // Provide a factory to ensure the original module is not executed
 vi.mock('./upload-to-twitter', () => ({
@@ -43,7 +55,7 @@ describe('main', () => {
     vi.mocked(mockedYoutubeApi.getLatestVideos).mockResolvedValue([]);
     // Access readFileSync from the Vitest-mocked fs module
     vi.mocked(fsActual.readFileSync).mockReturnValue(JSON.stringify([]));
-    vi.mocked(mockedDb.isUploadedToAllPlatforms).mockResolvedValue(false);
+    vi.mocked(mockedDb.shouldProcessVideo).mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -59,7 +71,7 @@ describe('main', () => {
   it('should not call processing functions if videos are already processed', async () => {
     const mockVideo = { videoId: '1', title: 'Test Video' };
     vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([mockVideo as any]);
-    vi.mocked(db.isUploadedToAllPlatforms).mockResolvedValue(true); // Already processed
+    vi.mocked(db.shouldProcessVideo).mockResolvedValue(false); // Already processed
 
     await main();
 
@@ -76,7 +88,7 @@ describe('main', () => {
       title: 'Test Video 2 Clip',
     };
     vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([mockVideo as any]);
-    vi.mocked(db.isUploadedToAllPlatforms).mockResolvedValue(false); // Needs processing
+    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true); // Needs processing
     vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
       async function* () {
         yield mockClip;
@@ -87,32 +99,28 @@ describe('main', () => {
     await main();
 
     expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
-      mockVideo,
+      expect.objectContaining(mockVideo),
     );
     expect(uploadToPlatforms.uploadToPlatforms).toHaveBeenCalledWith(mockClip);
   });
 
   it('should handle errors during video processing', async () => {
     const mockVideo = { videoId: '3', title: 'Test Video 3' };
-    const consoleSpy = vi.spyOn(console, 'log');
     vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([mockVideo as any]);
-    vi.mocked(db.isUploadedToAllPlatforms).mockResolvedValue(false); // Needs processing
+    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true); // Needs processing
     const testError = new Error('Test processing error');
     vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
       async function* () {
         throw testError;
-        // No explicit return needed here as it throws, but being consistent wouldn't hurt
-        // However, to minimize changes, I'll leave it as is, as throwing functions don't "return" in the same way.
       },
     );
 
     await main();
 
-    expect(consoleSpy).toHaveBeenCalledWith(
+    expect(loggerModule.logger.error).toHaveBeenCalledWith(
       `Error handling video ${mockVideo.videoId} - ${mockVideo.title}:`,
       testError,
     );
-    consoleSpy.mockRestore();
   });
 
   it('should process all videos on the last run of the day and reset counters', async () => {
@@ -128,7 +136,7 @@ describe('main', () => {
       mockVideo1 as any,
     ]);
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([mockVideo2])); // Mock for loadExtraVideos
-    vi.mocked(db.isUploadedToAllPlatforms).mockResolvedValue(false);
+    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true);
 
     let callCount = 0;
     vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
@@ -144,7 +152,7 @@ describe('main', () => {
     await main(); // First call in the last hour
 
     expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
-      mockVideo1,
+      expect.objectContaining({ videoId: '4' }),
     );
     expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
       expect.objectContaining({ videoId: '5', title: 'Extra Video' }),
@@ -153,7 +161,7 @@ describe('main', () => {
     expect(uploadToPlatforms.uploadToPlatforms).toHaveBeenCalledWith(mockClip2);
 
     // Check if the reset message is logged
-    expect(consoleSpy).toHaveBeenCalledWith('Videos uploaded today: 2');
+    expect(loggerModule.logger.log).toHaveBeenCalledWith('Videos uploaded today: 2');
 
     // To truly test reset, we would need to call main() again and check if videosUploadedToday is 0.
     // This might be complex due to the single-run nature of the test setup for main.
@@ -179,7 +187,7 @@ describe('main', () => {
     }));
 
     vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue(videos as any[]);
-    vi.mocked(db.isUploadedToAllPlatforms).mockResolvedValue(false); // Needs processing
+    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true); // Needs processing
 
     let clipIndex = 0;
     vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
