@@ -1,4 +1,4 @@
-FROM node:25-alpine
+FROM node:26-alpine
 
 RUN apk add --no-cache ffmpeg python3 py3-setuptools make g++ curl unzip libc6-compat
 
