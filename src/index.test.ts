@@ -1,212 +1,222 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-// Import dynamically after module reset
-// import { main, MAX_VIDEOS_PER_DAY } from '../src';
+import fs from 'node:fs';
 import * as db from './db';
 import * as extractQuickBits from './extract-quick-bits';
-import * as uploadToPlatforms from './upload-to-platforms';
+import * as uploads from './upload-to-platforms';
 import * as youtubeApi from './youtube-api';
 import * as loggerModule from './logger';
-import * as hassModule from './hass';
-import fs from 'node:fs';
+import { TWITTER, YOUTUBE } from './types';
+import type { Video } from './youtube-api';
 
-vi.mock('./db');
+vi.mock('./db', async (importOriginal) => ({
+  ...(await importOriginal<typeof db>()),
+  initDb: vi.fn(),
+  getPendingPlatforms: vi.fn(),
+  getUploadsToday: vi.fn(),
+}));
 vi.mock('./extract-quick-bits');
 vi.mock('./upload-to-platforms');
 vi.mock('./youtube-api');
-vi.mock('./logger', () => ({
-  logger: {
-    log: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-vi.mock('./hass', () => ({
-  updateHassStatus: vi.fn(),
-  sendHassNotification: vi.fn(),
-}));
+vi.mock('./logger', () => ({ logger: { log: vi.fn(), error: vi.fn() } }));
+vi.mock('./hass', () => ({ updateHassStatus: vi.fn() }));
 vi.mock('node:fs');
-// Provide a factory to ensure the original module is not executed
-vi.mock('./upload-to-twitter', () => ({
-  uploadToTwitter: vi.fn().mockResolvedValue('mocked-tweet-id'),
-}));
-vi.mock('./upload-to-youtube', () => ({
-  uploadToYoutube: vi.fn().mockResolvedValue('mocked-youtube-id'),
-}));
+vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
+vi.mock('./upload-to-twitter', () => ({ uploadToTwitter: vi.fn() }));
+vi.mock('./upload-to-youtube', () => ({ uploadToYoutube: vi.fn() }));
+
+const video = (id: string): Video => ({
+  videoId: id,
+  title: `Video ${id}`,
+  publishedAt: '2026-09-01T00:00:00Z',
+});
 
 describe('main', () => {
-  let main: typeof import('../src').main;
-  let MAX_VIDEOS_PER_DAY: typeof import('../src').MAX_VIDEOS_PER_DAY;
+  let main: typeof import('./index').main;
+  let limit: number;
 
   beforeEach(async () => {
     vi.resetModules();
-    vi.clearAllMocks();
-
-    // Re-import after reset
-    // Adding .js extension for Node16/Next module resolution
-    const appModule = await import('../src/index.js');
-    main = appModule.main;
-    MAX_VIDEOS_PER_DAY = appModule.MAX_VIDEOS_PER_DAY;
-
-    // Reset behavior of mocks using the top-level vi.mock'd modules
-    // Import the mocked modules to access their mocked functions
-    const mockedYoutubeApi = await import('./youtube-api.js');
-    const fsActual = await import('node:fs'); // Should be the mocked version
-    const mockedDb = await import('./db.js');
-
-    vi.mocked(mockedYoutubeApi.getLatestVideos).mockResolvedValue([]);
-    // Access readFileSync from the Vitest-mocked fs module
-    vi.mocked(fsActual.readFileSync).mockReturnValue(JSON.stringify([]));
-    vi.mocked(mockedDb.shouldProcessVideo).mockResolvedValue(true);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers(); // Reset time mocks
-  });
-
-  it('should not call processing functions if there are no videos', async () => {
-    await main();
-    expect(extractQuickBits.extractQuickBitsChapter).not.toHaveBeenCalled();
-    expect(uploadToPlatforms.uploadToPlatforms).not.toHaveBeenCalled();
-  });
-
-  it('should not call processing functions if videos are already processed', async () => {
-    const mockVideo = { videoId: '1', title: 'Test Video' };
-    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([mockVideo as any]);
-    vi.mocked(db.shouldProcessVideo).mockResolvedValue(false); // Already processed
-
-    await main();
-
-    expect(extractQuickBits.extractQuickBitsChapter).not.toHaveBeenCalled();
-    expect(uploadToPlatforms.uploadToPlatforms).not.toHaveBeenCalled();
-  });
-
-  it('should call processing functions for videos that need processing', async () => {
-    const mockVideo = { videoId: '2', title: 'Test Video 2' };
-    const mockClip = {
-      id: 'clip_2',
-      path: '/test/clip_2.mp4',
-      publishedAt: new Date().toISOString(),
-      title: 'Test Video 2 Clip',
-    };
-    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([mockVideo as any]);
-    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true); // Needs processing
-    vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
-      async function* () {
-        yield mockClip;
-        return undefined;
-      },
-    );
-
-    await main();
-
-    expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
-      expect.objectContaining(mockVideo),
-    );
-    expect(uploadToPlatforms.uploadToPlatforms).toHaveBeenCalledWith(mockClip);
-  });
-
-  it('should handle errors during video processing', async () => {
-    const mockVideo = { videoId: '3', title: 'Test Video 3' };
-    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([mockVideo as any]);
-    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true); // Needs processing
-    const testError = new Error('Test processing error');
-    vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
-      async function* () {
-        throw testError;
-      },
-    );
-
-    await main();
-
-    expect(loggerModule.logger.error).toHaveBeenCalledWith(
-      `Error handling video ${mockVideo.videoId} - ${mockVideo.title}:`,
-      testError,
-    );
-  });
-
-  it('should process all videos on the last run of the day and reset counters', async () => {
+    vi.resetAllMocks();
     vi.useFakeTimers();
-    vi.setSystemTime(new Date().setHours(23)); // Mock time to be 11 PM
+    vi.setSystemTime(new Date(2026, 9, 14, 12));
+    const app = await import('./index.js');
+    main = app.main;
+    limit = app.MAX_VIDEOS_PER_DAY;
 
-    const mockVideo1 = { videoId: '4', title: 'YouTube Video', publishedAt: new Date().toISOString() }; // Add publishedAt for Video type if needed
-    const mockVideo2 = { videoId: '5', title: 'Extra Video', publishedAt: new Date().toISOString() };
-    const mockClip1 = { id: 'clip_4', path: '/test/clip_4.mp4', publishedAt: mockVideo1.publishedAt, title: mockVideo1.title + " Clip" };
-    const mockClip2 = { id: 'clip_5', path: '/test/clip_5.mp4', publishedAt: mockVideo2.publishedAt, title: mockVideo2.title + " Clip" };
-
-    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([
-      mockVideo1 as any,
-    ]);
-    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([mockVideo2])); // Mock for loadExtraVideos
-    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true);
-
-    let callCount = 0;
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([]);
+    vi.mocked(fs.readFileSync).mockReturnValue('[]');
+    vi.mocked(db.getPendingPlatforms).mockResolvedValue([YOUTUBE, TWITTER]);
+    vi.mocked(db.getUploadsToday).mockResolvedValue({ youtube: 0, twitter: 0 });
     vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
-      async function* (video) {
-        if (video.videoId === '4') yield mockClip1;
-        else if (video.videoId === '5') yield mockClip2;
+      async function* (source) {
+        yield {
+          id: source.videoId,
+          title: source.title,
+          publishedAt: source.publishedAt,
+          path: '/clip.mp4',
+        };
         return undefined;
       },
     );
-
-    const consoleSpy = vi.spyOn(console, 'log');
-
-    await main(); // First call in the last hour
-
-    expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
-      expect.objectContaining({ videoId: '4' }),
+    vi.mocked(uploads.uploadToPlatforms).mockImplementation(
+      async (_clip, platforms) =>
+        (platforms ?? [YOUTUBE, TWITTER]).map((platform) => ({
+          platform,
+          uploaded: true,
+        })),
     );
-    expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
-      expect.objectContaining({ videoId: '5', title: 'Extra Video' }),
-    );
-    expect(uploadToPlatforms.uploadToPlatforms).toHaveBeenCalledWith(mockClip1);
-    expect(uploadToPlatforms.uploadToPlatforms).toHaveBeenCalledWith(mockClip2);
-
-    // Check if the reset message is logged
-    expect(loggerModule.logger.log).toHaveBeenCalledWith('Videos uploaded today: 2');
-
-    // To truly test reset, we would need to call main() again and check if videosUploadedToday is 0.
-    // This might be complex due to the single-run nature of the test setup for main.
-    // For now, logging the count is an indirect indicator.
-
-    consoleSpy.mockRestore();
   });
 
-  it('should not process more videos than MAX_VIDEOS_PER_DAY', async () => {
-    const videos = Array.from({ length: MAX_VIDEOS_PER_DAY + 2 }, (_, i) => {
-      const videoId = `${i + 6}`;
-      return {
-        videoId: videoId,
-        title: `Test Video ${videoId}`,
-        publishedAt: new Date().toISOString() // Add publishedAt for Video type if needed
-      };
+  afterEach(() => vi.useRealTimers());
+
+  it('does not process an empty list', async () => {
+    await main();
+    expect(extractQuickBits.extractQuickBitsChapter).not.toHaveBeenCalled();
+  });
+
+  it('skips videos with no eligible platforms', async () => {
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([video('done')]);
+    vi.mocked(db.getPendingPlatforms).mockResolvedValue([]);
+    await main();
+    expect(extractQuickBits.extractQuickBitsChapter).not.toHaveBeenCalled();
+  });
+
+  it('continues to new YouTube videos when old X uploads fail', async () => {
+    const oldestFirst = Array.from({ length: limit }, (_, i) =>
+      video(`old-${i}`),
+    );
+    oldestFirst.push(video('new'));
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue(
+      oldestFirst.reverse(),
+    );
+    vi.mocked(db.getPendingPlatforms).mockImplementation(async (_db, id) =>
+      id === 'new' ? [YOUTUBE] : [TWITTER],
+    );
+    vi.mocked(uploads.uploadToPlatforms).mockImplementation(
+      async (_clip, platforms) =>
+        platforms!.map((platform) => ({
+          platform,
+          uploaded: platform === YOUTUBE,
+        })),
+    );
+    await main();
+    expect(uploads.uploadToPlatforms).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'new' }),
+      [YOUTUBE],
+    );
+  });
+
+  it('counts only successful uploads and enforces a separate limit per platform', async () => {
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue(
+      Array.from({ length: limit + 2 }, (_, i) => video(`${i}`)).reverse(),
+    );
+    vi.mocked(uploads.uploadToPlatforms).mockImplementation(
+      async (_clip, platforms) =>
+        platforms!.map((platform) => ({
+          platform,
+          uploaded: platform === YOUTUBE,
+        })),
+    );
+    await main();
+    const calls = vi.mocked(uploads.uploadToPlatforms).mock.calls;
+    expect(
+      calls.filter(([, platforms]) => platforms!.includes(YOUTUBE)),
+    ).toHaveLength(limit);
+    expect(
+      calls.filter(([, platforms]) => platforms!.includes(TWITTER)),
+    ).toHaveLength(limit + 2);
+  });
+
+  it('continues YouTube uploads after a payment error blocks X for the run', async () => {
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([
+      video('new'),
+      video('old'),
+    ]);
+    vi.mocked(uploads.uploadToPlatforms).mockImplementation(
+      async (_clip, platforms) =>
+        platforms!.map((platform) => ({
+          platform,
+          uploaded: platform === YOUTUBE,
+          blocked: platform === TWITTER,
+        })),
+    );
+    await main();
+    expect(uploads.uploadToPlatforms).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ id: 'new' }),
+      [YOUTUBE],
+    );
+  });
+
+  it('uses persisted counts so a restart cannot reset the daily limit', async () => {
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([video('pending')]);
+    vi.mocked(db.getUploadsToday).mockResolvedValue({
+      youtube: limit,
+      twitter: 0,
     });
-    const mockClips = videos.map((v) => ({
-      id: `clip_${v.videoId}`,
-      path: `/test/clip_${v.videoId}.mp4`,
-      publishedAt: v.publishedAt,
-      title: `${v.title} Clip`
-    }));
+    await main();
+    expect(uploads.uploadToPlatforms).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'pending' }),
+      [TWITTER],
+    );
+  });
 
-    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue(videos as any[]);
-    vi.mocked(db.shouldProcessVideo).mockResolvedValue(true); // Needs processing
+  it('does not process videos when all platform limits are reached', async () => {
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([video('pending')]);
+    vi.mocked(db.getUploadsToday).mockResolvedValue({
+      youtube: limit,
+      twitter: limit,
+    });
+    await main();
+    expect(extractQuickBits.extractQuickBitsChapter).not.toHaveBeenCalled();
+  });
 
-    let clipIndex = 0;
-    vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementation(
+  it('includes and deduplicates the static backlog on the last run', async () => {
+    vi.setSystemTime(new Date(2026, 9, 14, 23));
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([video('recent')]);
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify([video('extra'), video('recent')]),
+    );
+    await main();
+    expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledTimes(2);
+    expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledWith(
+      video('extra'),
+    );
+  });
+
+  it('logs extraction errors and continues to the next video', async () => {
+    vi.mocked(youtubeApi.getLatestVideos).mockResolvedValue([
+      video('good'),
+      video('bad'),
+    ]);
+    const error = new Error('Extraction failed');
+    vi.mocked(extractQuickBits.extractQuickBitsChapter).mockImplementationOnce(
       async function* () {
-        // Yield one clip at a time from the mockClips array
-        if (clipIndex < mockClips.length) {
-          yield mockClips[clipIndex++];
-        }
-        return undefined;
+        throw error;
       },
     );
-
     await main();
+    expect(loggerModule.logger.error).toHaveBeenCalledWith(
+      'Error handling video bad - Video bad:',
+      error,
+    );
+    expect(uploads.uploadToPlatforms).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'good' }),
+      [YOUTUBE, TWITTER],
+    );
+  });
 
-    expect(extractQuickBits.extractQuickBitsChapter).toHaveBeenCalledTimes(
-      MAX_VIDEOS_PER_DAY,
+  it('prevents overlapping runs', async () => {
+    let finish!: (videos: Video[]) => void;
+    vi.mocked(youtubeApi.getLatestVideos).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
     );
-    expect(uploadToPlatforms.uploadToPlatforms).toHaveBeenCalledTimes(
-      MAX_VIDEOS_PER_DAY,
-    );
+    const first = main();
+    await main();
+    finish([]);
+    await first;
+    expect(youtubeApi.getLatestVideos).toHaveBeenCalledTimes(1);
   });
 });

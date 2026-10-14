@@ -6,10 +6,16 @@ import path from 'node:path';
 import cron from 'node-cron';
 import he from 'he';
 
-import { initDb, shouldProcessVideo } from './db';
+import {
+  ALL_PLATFORMS,
+  initDb,
+  getPendingPlatforms,
+  getUploadsToday,
+} from './db';
 import { extractQuickBitsChapter } from './extract-quick-bits';
 import { uploadToPlatforms } from './upload-to-platforms';
 import { getLatestVideos, Video } from './youtube-api';
+import { Platform, TWITTER, YOUTUBE } from './types';
 import { logger } from './logger';
 import { updateHassStatus } from './hass';
 
@@ -28,20 +34,35 @@ async function loadExtraVideos() {
 
 const MAX_VIDEOS_PER_DAY = 5;
 
-let videosUploadedToday = 0;
 let runs = 0;
+let running = false;
+
+/** Keep hourly runs from overlapping while draining the backlog. */
 async function main() {
+  if (running) {
+    logger.log('Previous run is still processing; skipping this run');
+    return;
+  }
+  running = true;
+  try {
+    await processVideos();
+  } finally {
+    running = false;
+  }
+}
+
+async function processVideos() {
   runs++;
   await updateHassStatus({ state: 'Processing', attributes: { runs } });
   const db = await initDb();
+  const uploadedToday = await getUploadsToday(db);
+  const blockedPlatforms = new Set<Platform>();
   let [videos, extraVideos] = await Promise.all([
     getLatestVideos(50),
     loadExtraVideos(),
   ]);
 
   const isLastRunOfTheDay = new Date().getHours() === 23;
-
-  // Last run of the day
   if (isLastRunOfTheDay) {
     logger.log('Last run of the day, trying to process all videos');
     videos = [...videos, ...extraVideos];
@@ -49,21 +70,30 @@ async function main() {
     logger.log(`Processing latest videos, run ${runs}`);
   }
 
-  // Reverse videos to process oldest first (backlog first)
-  videos.reverse();
+  // Deduplicate before processing oldest first (backlog first).
+  videos = [
+    ...new Map(videos.map((video) => [video.videoId, video])).values(),
+  ].reverse();
 
   let processedCount = 0;
   let skippedCount = 0;
+  let failedCount = 0;
 
   for (const video of videos) {
-    if (videosUploadedToday >= MAX_VIDEOS_PER_DAY) {
-      logger.log('Daily upload limit reached');
+    const availablePlatforms = ALL_PLATFORMS.filter(
+      (platform) =>
+        uploadedToday[platform] < MAX_VIDEOS_PER_DAY &&
+        !blockedPlatforms.has(platform),
+    );
+    if (!availablePlatforms.length) {
+      logger.log('Daily upload limits reached or platforms unavailable');
       break;
     }
-
-    const canBeProcessed = await shouldProcessVideo(db, video.videoId);
-
-    if (!canBeProcessed) {
+    const pending = await getPendingPlatforms(db, video.videoId);
+    const eligiblePlatforms = pending.filter((platform) =>
+      availablePlatforms.includes(platform),
+    );
+    if (!eligiblePlatforms.length) {
       skippedCount++;
       continue;
     }
@@ -74,12 +104,21 @@ async function main() {
         state: 'Processing Video',
         attributes: { videoId: video.videoId, title: video.title },
       });
+      let uploaded = false;
       for await (const clip of extractQuickBitsChapter(video)) {
-        await uploadToPlatforms(clip);
+        const results = await uploadToPlatforms(clip, eligiblePlatforms);
+        for (const result of results) {
+          if (result.uploaded) {
+            uploadedToday[result.platform]++;
+            uploaded = true;
+          }
+          if (result.blocked) blockedPlatforms.add(result.platform);
+        }
       }
-      videosUploadedToday++;
-      processedCount++;
+      if (uploaded) processedCount++;
+      else failedCount++;
     } catch (error) {
+      failedCount++;
       logger.error(
         `Error handling video ${video.videoId} - ${video.title}:`,
         error,
@@ -88,26 +127,26 @@ async function main() {
   }
 
   logger.log(`Run summary:
-    Total checked: ${processedCount + skippedCount}
+    Total checked: ${processedCount + skippedCount + failedCount}
     Processed: ${processedCount}
     Skipped: ${skippedCount}
+    Failed: ${failedCount}
+    YouTube uploads today: ${uploadedToday[YOUTUBE]}
+    X uploads today: ${uploadedToday[TWITTER]}
   `);
 
   await updateHassStatus({
     state: 'Idle',
     attributes: {
-      last_run_total: processedCount + skippedCount,
+      last_run_total: processedCount + skippedCount + failedCount,
       last_run_processed: processedCount,
       last_run_skipped: skippedCount,
-      videos_uploaded_today: videosUploadedToday,
+      last_run_failed: failedCount,
+      videos_uploaded_today: Math.max(...Object.values(uploadedToday)),
+      youtube_uploaded_today: uploadedToday[YOUTUBE],
+      twitter_uploaded_today: uploadedToday[TWITTER],
     },
   });
-
-  if (isLastRunOfTheDay) {
-    logger.log(`Videos uploaded today: ${videosUploadedToday}`);
-    videosUploadedToday = 0;
-    runs = 0;
-  }
 }
 
 const task = cron.schedule('0 * * * *', main);

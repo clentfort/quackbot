@@ -7,6 +7,9 @@ import {
   isUploadedToPlatform,
   isUploadedToAllPlatforms,
   shouldProcessVideo,
+  shouldUploadToPlatform,
+  getPendingPlatforms,
+  getUploadsToday,
   logUploadError,
   TWITTER,
   YOUTUBE,
@@ -158,6 +161,44 @@ describe('db.ts', () => {
     });
   });
 
+  describe('platform accounting', () => {
+    it('counts today’s uploads separately and excludes yesterday', async () => {
+      await saveUpload(dbInstance, 'today-youtube', YOUTUBE, 'id');
+      await saveUpload(dbInstance, 'today-twitter', TWITTER, 'id');
+      await saveUpload(dbInstance, 'yesterday', YOUTUBE, 'id');
+      await dbInstance.run(
+        "UPDATE video_uploads SET published_at = '2026-10-13 10:00:00' WHERE video_id = 'yesterday'",
+      );
+      await dbInstance.run(
+        "UPDATE video_uploads SET published_at = '2026-10-14 12:00:00' WHERE video_id != 'yesterday'",
+      );
+      expect(
+        await getUploadsToday(dbInstance, new Date('2026-10-14T12:00:00Z')),
+      ).toEqual({ youtube: 1, twitter: 1 });
+      expect(
+        await getUploadsToday(dbInstance, new Date('2026-10-15T12:00:00Z')),
+      ).toEqual({ youtube: 0, twitter: 0 });
+    });
+
+    it('clears retry errors after a successful upload', async () => {
+      await logUploadError(dbInstance, 'recovered', YOUTUBE, 'error');
+      await saveUpload(dbInstance, 'recovered', YOUTUBE, 'id');
+      expect(
+        await dbInstance.get(
+          'SELECT * FROM upload_errors WHERE video_id = ?',
+          'recovered',
+        ),
+      ).toBeUndefined();
+    });
+
+    it('does not retry an already uploaded platform', async () => {
+      await saveUpload(dbInstance, 'uploaded', YOUTUBE, 'id');
+      expect(
+        await shouldUploadToPlatform(dbInstance, 'uploaded', YOUTUBE),
+      ).toBe(false);
+    });
+  });
+
   describe('shouldProcessVideo', () => {
     const videoId = 'processVideo';
 
@@ -172,11 +213,19 @@ describe('db.ts', () => {
       expect(await shouldProcessVideo(dbInstance, videoId)).toBe(false);
     });
 
-    it('should return false if any platform has 3 or more attempts', async () => {
+    it('keeps YouTube eligible when X has exhausted its retries', async () => {
       const videoId2 = 'failingVideo';
       await logUploadError(dbInstance, videoId2, TWITTER, 'err');
       await logUploadError(dbInstance, videoId2, TWITTER, 'err');
       await logUploadError(dbInstance, videoId2, TWITTER, 'err');
+      expect(await shouldProcessVideo(dbInstance, videoId2)).toBe(true);
+      expect(await shouldUploadToPlatform(dbInstance, videoId2, TWITTER)).toBe(
+        false,
+      );
+      expect(await getPendingPlatforms(dbInstance, videoId2)).toEqual([
+        YOUTUBE,
+      ]);
+      await saveUpload(dbInstance, videoId2, YOUTUBE, 'youtube-id');
       expect(await shouldProcessVideo(dbInstance, videoId2)).toBe(false);
     });
   });

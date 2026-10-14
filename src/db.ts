@@ -38,39 +38,97 @@ export async function initDb(): Promise<sqlite.Database> {
     );
   `);
 
-  // Handle existing databases that might not have the 'attempts' column
-  try {
-    await db.exec('ALTER TABLE upload_errors ADD COLUMN attempts INTEGER DEFAULT 1');
-  } catch (error) {
-    // Column might already exist, ignore error
+  const columns = await db.all<Array<{ name: string; notnull: number }>>(
+    'PRAGMA table_info(upload_errors)',
+  );
+  if (!columns.some(({ name }) => name === 'attempts')) {
+    await db.exec(
+      'ALTER TABLE upload_errors ADD COLUMN attempts INTEGER DEFAULT 1',
+    );
+  }
+
+  // Older installations required an upload ID even when the upload failed.
+  if (columns.some(({ name, notnull }) => name === 'platform_id' && notnull)) {
+    await db.exec('BEGIN IMMEDIATE');
+    try {
+      await db.exec(`
+        CREATE TABLE upload_errors_migrated (
+          video_id TEXT NOT NULL,
+          platform TEXT NOT NULL,
+          platform_id TEXT,
+          error TEXT NOT NULL,
+          attempts INTEGER DEFAULT 1,
+          PRIMARY KEY (video_id, platform)
+        );
+        INSERT INTO upload_errors_migrated
+          SELECT video_id, platform, platform_id, error, attempts FROM upload_errors;
+        DROP TABLE upload_errors;
+        ALTER TABLE upload_errors_migrated RENAME TO upload_errors;
+        COMMIT;
+      `);
+    } catch (error) {
+      await db.exec('ROLLBACK');
+      db = undefined;
+      throw error;
+    }
   }
 
   return db;
 }
 
-export async function shouldProcessVideo(
+/** Retry eligibility is independent for each platform. */
+export async function shouldUploadToPlatform(
   db: sqlite.Database,
   videoId: string,
-) {
-  const uploadedCount = await db.get<{ count: number }>(
-    'SELECT COUNT(1) AS count FROM video_uploads WHERE video_id = ?',
-    videoId,
-  );
-
-  if (uploadedCount?.count === ALL_PLATFORMS.length) {
+  platform: Platform,
+): Promise<boolean> {
+  if (await isUploadedToPlatform(db, videoId, platform)) {
     return false;
   }
-
-  const errorCount = await db.get<{ count: number }>(
-    'SELECT COUNT(1) AS count FROM upload_errors WHERE video_id = ? AND attempts >= 3',
+  const error = await db.get<{ attempts: number }>(
+    'SELECT attempts FROM upload_errors WHERE video_id = ? AND platform = ?',
     videoId,
+    platform,
   );
+  return (error?.attempts ?? 0) < 3;
+}
 
-  if (errorCount && errorCount.count > 0) {
-    return false;
+export async function getPendingPlatforms(
+  db: sqlite.Database,
+  videoId: string,
+): Promise<Platform[]> {
+  const pending = await Promise.all(
+    ALL_PLATFORMS.map(async (platform) => ({
+      platform,
+      eligible: await shouldUploadToPlatform(db, videoId, platform),
+    })),
+  );
+  return pending
+    .filter(({ eligible }) => eligible)
+    .map(({ platform }) => platform);
+}
+
+export async function shouldProcessVideo(db: sqlite.Database, videoId: string) {
+  return (await getPendingPlatforms(db, videoId)).length > 0;
+}
+
+/** Count successful uploads since local midnight, including earlier processes. */
+export async function getUploadsToday(
+  db: sqlite.Database,
+  now = new Date(),
+): Promise<Record<Platform, number>> {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const since = midnight.toISOString().slice(0, 19).replace('T', ' ');
+  const rows = await db.all<Array<{ platform: Platform; count: number }>>(
+    'SELECT platform, COUNT(*) AS count FROM video_uploads WHERE published_at >= ? GROUP BY platform',
+    since,
+  );
+  const counts = { [YOUTUBE]: 0, [TWITTER]: 0 };
+  for (const { platform, count } of rows) {
+    if (ALL_PLATFORMS.includes(platform)) counts[platform] = count;
   }
-
-  return true;
+  return counts;
 }
 
 export async function isUploadedToAllPlatforms(
@@ -105,12 +163,18 @@ export async function saveUpload(
   platform: Platform,
   platformId: string,
 ) {
-  return db.run(
+  const result = await db.run(
     'INSERT OR REPLACE INTO video_uploads (video_id, platform, platform_id) VALUES (?, ?, ?)',
     videoId,
     platform,
     platformId,
   );
+  await db.run(
+    'DELETE FROM upload_errors WHERE video_id = ? AND platform = ?',
+    videoId,
+    platform,
+  );
+  return result;
 }
 
 export async function logUploadError(

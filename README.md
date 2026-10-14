@@ -26,6 +26,19 @@ With these variables set, the bot can be run with the following command:
 docker run --env-file .env quackbot:latest
 ```
 
+## Upload retries and limits
+
+Quackbot processes the latest 50 source videos oldest-first and includes
+`videos.json` on the last hourly run of the day. Already uploaded platforms are
+skipped. Each platform has its own limit of five successful uploads per day,
+counted from SQLite so container restarts do not reset the limit.
+
+Upload failures are retried up to three times per video and platform. Payment,
+authentication, and rate-limit errors pause that platform for the rest of the
+run without blocking the other platform. Legacy error tables are migrated
+automatically. After resolving a platform issue, remove its exhausted entries
+from `upload_errors` to retry those videos.
+
 ## Setting up the environment
 
 The Google OAuth client ID and secret can be obtained by creating a project in the
