@@ -6,16 +6,12 @@ import path from 'node:path';
 import cron from 'node-cron';
 import he from 'he';
 
-import {
-  ALL_PLATFORMS,
-  initDb,
-  getPendingPlatforms,
-  getUploadsToday,
-} from './db';
+import { initDb, getPendingPlatforms, getUploadsToday } from './db';
 import { extractQuickBitsChapter } from './extract-quick-bits';
 import { uploadToPlatforms } from './upload-to-platforms';
 import { getLatestVideos, Video } from './youtube-api';
 import { Platform, TWITTER, YOUTUBE } from './types';
+import { ENABLED_PLATFORMS } from './platforms';
 import { logger } from './logger';
 import { updateHassStatus } from './hass';
 
@@ -80,7 +76,7 @@ async function processVideos() {
   let failedCount = 0;
 
   for (const video of videos) {
-    const availablePlatforms = ALL_PLATFORMS.filter(
+    const availablePlatforms = ENABLED_PLATFORMS.filter(
       (platform) =>
         uploadedToday[platform] < MAX_VIDEOS_PER_DAY &&
         !blockedPlatforms.has(platform),

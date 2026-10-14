@@ -20,6 +20,10 @@ following environment variables:
 | `X_ACCESS_TOKEN`             | The X OAuth Access Token                                    |
 | `X_ACCESS_TOKEN_SECRET`      | The X OAuth token secret                                    |
 
+Set `X_ENABLED=false` to disable X posting and retries. X credentials are not
+required in this mode. Existing X upload history is preserved; remove the flag
+or set it to `true` to re-enable X.
+
 With these variables set, the bot can be run with the following command:
 
 ```bash

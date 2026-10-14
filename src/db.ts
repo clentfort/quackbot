@@ -1,6 +1,7 @@
 import sqlite3 from 'sqlite3';
 import * as sqlite from 'sqlite';
 import { Platform, TWITTER, YOUTUBE } from './types';
+import { ENABLED_PLATFORMS } from './platforms';
 
 export const ALL_PLATFORMS: Platform[] = [TWITTER, YOUTUBE];
 export { TWITTER, YOUTUBE }; // Re-export for use in tests
@@ -98,7 +99,7 @@ export async function getPendingPlatforms(
   videoId: string,
 ): Promise<Platform[]> {
   const pending = await Promise.all(
-    ALL_PLATFORMS.map(async (platform) => ({
+    ENABLED_PLATFORMS.map(async (platform) => ({
       platform,
       eligible: await shouldUploadToPlatform(db, videoId, platform),
     })),
@@ -135,12 +136,12 @@ export async function isUploadedToAllPlatforms(
   db: sqlite.Database,
   videoId: string,
 ) {
-  const row = await db.get<{ count: number }>(
-    'SELECT COUNT(1) AS count FROM video_uploads WHERE video_id = ?',
-    videoId,
+  const uploaded = await Promise.all(
+    ENABLED_PLATFORMS.map((platform) =>
+      isUploadedToPlatform(db, videoId, platform),
+    ),
   );
-
-  return row?.count === ALL_PLATFORMS.length;
+  return uploaded.every(Boolean);
 }
 
 export async function isUploadedToPlatform(

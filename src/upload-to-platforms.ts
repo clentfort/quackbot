@@ -5,7 +5,7 @@ import {
   saveUpload,
 } from './db';
 import { Clip, Platform, TWITTER, YOUTUBE } from './types';
-import { uploadToTwitter } from './upload-to-twitter';
+import { ENABLED_PLATFORMS } from './platforms';
 import { uploadToYoutube } from './upload-to-youtube';
 import { logger } from './logger';
 import { sendHassNotification } from './hass';
@@ -14,7 +14,13 @@ type PlatformUpload = (clip: Clip) => Promise<string>;
 
 const platforms: Array<[Platform, PlatformUpload]> = [
   [YOUTUBE, uploadToYoutube],
-  [TWITTER, uploadToTwitter],
+  [
+    TWITTER,
+    async (clip) => {
+      const { uploadToTwitter } = await import('./upload-to-twitter.js');
+      return uploadToTwitter(clip);
+    },
+  ],
 ];
 
 export interface UploadResult {
@@ -35,12 +41,16 @@ function isPlatformBlocked(error: unknown, message: string): boolean {
 /** Upload only to eligible platforms, reporting success independently. */
 export async function uploadToPlatforms(
   clip: Clip,
-  requestedPlatforms: Platform[] = [YOUTUBE, TWITTER],
+  requestedPlatforms: Platform[] = ENABLED_PLATFORMS,
 ): Promise<UploadResult[]> {
   const db = await initDb();
   return Promise.all(
     platforms
-      .filter(([platform]) => requestedPlatforms.includes(platform))
+      .filter(
+        ([platform]) =>
+          ENABLED_PLATFORMS.includes(platform) &&
+          requestedPlatforms.includes(platform),
+      )
       .map(async ([platform, upload]): Promise<UploadResult> => {
         try {
           if (!(await shouldUploadToPlatform(db, clip.id, platform))) {
