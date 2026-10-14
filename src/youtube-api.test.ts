@@ -1,5 +1,37 @@
-import { describe, it, expect } from 'vitest';
-import { parseDuration, parseChaptersFromDescription } from './youtube-api';
+import { describe, it, expect, vi } from 'vitest';
+import { exec } from 'youtube-dl-exec';
+import {
+  downloadVideo,
+  parseDuration,
+  parseChaptersFromDescription,
+} from './youtube-api';
+
+vi.mock('youtube-dl-exec', () => ({ exec: vi.fn() }));
+
+describe('downloadVideo', () => {
+  it('uses Node.js and merges separate video and audio streams into MP4', async () => {
+    await downloadVideo('https://www.youtube.com/watch?v=test', './video.mp4');
+
+    expect(exec).toHaveBeenCalledWith('https://www.youtube.com/watch?v=test', {
+      output: './video.mp4',
+      quiet: true,
+      jsRuntimes: 'node',
+      format: 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+      mergeOutputFormat: 'mp4',
+      remuxVideo: 'mp4',
+    });
+  });
+
+  it('propagates download failures', async () => {
+    vi.mocked(exec).mockImplementationOnce(() => {
+      throw new Error('Download failed');
+    });
+
+    await expect(
+      downloadVideo('https://example.com/video', './video.mp4'),
+    ).rejects.toThrow('Download failed');
+  });
+});
 
 describe('parseDuration', () => {
   it('should parse duration PT1H2M3S correctly', () => {

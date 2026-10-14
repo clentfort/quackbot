@@ -1,10 +1,6 @@
 FROM node:26-alpine
 
-RUN apk add --no-cache ffmpeg python3 py3-setuptools make g++ curl unzip libc6-compat
-
-RUN curl -fsSL https://deno.land/x/install/install.sh | sh
-ENV DENO_INSTALL="/root/.deno"
-ENV PATH="$DENO_INSTALL/bin:$PATH"
+RUN apk add --no-cache ffmpeg python3 py3-setuptools make g++
 
 WORKDIR /app
 

@@ -39,9 +39,7 @@ export interface Chapter {
 }
 
 // Fetch latest videos from the channel
-export async function getLatestVideos(
-  maxResults = 50,
-): Promise<Array<Video>> {
+export async function getLatestVideos(maxResults = 50): Promise<Array<Video>> {
   const url = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&channelId=${CHANNEL_ID}&order=date&part=snippet&type=video&maxResults=${maxResults}`;
   const response = await axios.get<{
     items: Array<YoutubeId & YoutubeSnippet>;
@@ -70,7 +68,11 @@ export async function downloadVideo(videoUrl: string, output: string) {
   return exec(videoUrl, {
     output,
     quiet: true,
-    format: 'b[ext=mp4]',
+    jsRuntimes: 'node',
+    // YouTube often provides video and audio as separate streams.
+    format: 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+    mergeOutputFormat: 'mp4',
+    remuxVideo: 'mp4',
   });
 }
 
